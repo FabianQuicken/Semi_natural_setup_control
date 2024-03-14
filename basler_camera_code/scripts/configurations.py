@@ -7,4 +7,14 @@ setup = {"top_1": 40405187,
          "top_3": None,
          "side_3": None}
 
-print(setup["top_1"])
+mo_det_thrsh = None
+
+fps = 30
+
+exposure_time = 10000 # in microseconds
+
+width = 1920 # max for Aca1920-150um is 1984
+
+height = 1080 # max for Aca1920-150um is 1200
+
+outputpath = ""

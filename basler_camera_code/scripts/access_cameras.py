@@ -52,6 +52,7 @@ def main():
 
                     # Apply threshold to highlight significant changes
                     _, thresh = cv2.threshold(diff_frame, 10, 255, cv2.THRESH_BINARY)
+                    print(_)
 
                     # Display the thresholded image
                     cv2.imshow("Motion Detection", thresh)

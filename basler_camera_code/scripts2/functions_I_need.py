@@ -97,6 +97,19 @@ def check_movement(motion_sum, thresh):
     
 # # # # THIS PART IS FOR DOING THE MOTION DETECTION # # # #
     
+# # # # THIS PART IS FOR VIDEO RECORDING # # # # 
+    
+def create_video_name(cam):
+    pass
+    
+def setup_video_writer(video_name=str, cam):
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(video_name, fourcc, 30.0, (cam.Width.Value, cam.Height.Value))
+    pass
+
+def write_frame_to_video():
+    pass
+    
 
     
 

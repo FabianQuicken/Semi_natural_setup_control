@@ -23,8 +23,8 @@ def get_camera_info():
 # initialize camera objects
 def camera_ini(info):
     """
-    A camera class gets initialized based on the camera infos passed to the func
-    it also gets opened, so it is available for changing settings or start grabbing frames
+    A camera class gets initialized based on the camera infos passed to the func.
+    It also gets opened, so it is available for changing settings or start grabbing frames
     """
     cam = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateDevice(info))
     cam.Open()
@@ -32,9 +32,9 @@ def camera_ini(info):
 
 
 # adjust camera settings
-def camera_settings(cam, height=1020, width=1920, fps=60, expo_time=10000):
+def camera_settings(cam, height=1080, width=1920, fps=60, expo_time=10000):
     """
-    Changes the settings of the selected camera
+    Changes the settings of the selected camera.
     """
     cam.Width.SetValue(width)  # Set width
     cam.Height.SetValue(height)  # Set height
@@ -54,10 +54,12 @@ def camera_grab(cam):
 def get_frame(cam):
     """
     A grab result based on a strategy (see camera_grab()) is retrieved. The Camera waits a maximum of 5000 ms for a grab, 
-    this value can be adjusted. 
+    this value can be adjusted. The result gets transformed by .Array. 
     """
     frame = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
-    return frame.Array
+    img = frame.Array
+    frame.Release()
+    return img
 
 # Shut down cameras after a recording
 def close_camera(cam):
@@ -100,16 +102,24 @@ def check_movement(motion_sum, thresh):
     
 # # # # THIS PART IS FOR VIDEO RECORDING # # # # 
     
-def create_video_name():
+def create_video_name(cam_num=str):
     current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    video_name = current_time + "_" + str(cam_num) + ".avi"
+    return video_name
     
-    
-def setup_video_writer(cam, video_name=str):
+def setup_video_writer(cam, video_name=str, fps=float):
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(video_name, fourcc, 30.0, (cam.Width.Value, cam.Height.Value))
-    pass
+    out = cv2.VideoWriter(video_name, fourcc, fps, (cam.Width.Value, cam.Height.Value))
+    return out
+
+def convert_frame_format(img):
+    if len(img.shape) == 2:
+        # Convert grayscale to BGR format
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    return img
 
 def write_frame_to_video():
+    # doing this with .write() in the testing() for now
     pass
 
 # # # # THIS PART IS FOR VISUALIZING CAMERAS # # # #
@@ -136,10 +146,19 @@ def testing():
     camera_2 = camera_settings(camera_2)
 
     # test code for recording
-    frames = 1000
+    frames = 300
     recording = True
     prev_frame1 = None
     prev_frame2 = None
+
+    # test video recording (setting up recorder)
+    video_name1 = create_video_name(cam_serial_numbers[0])
+    output1 = setup_video_writer(cam=camera_1,video_name=video_name1,fps=60.0)
+
+    video_name2 = create_video_name(cam_serial_numbers[1])
+    output2 = setup_video_writer(cam=camera_2,video_name=video_name2,fps=60.0)
+
+    
     while recording:
         if not camera_1.IsGrabbing():
             camera_grab(camera_1)
@@ -147,9 +166,6 @@ def testing():
         if not camera_2.IsGrabbing():
             camera_grab(camera_2)
         frame2 = get_frame(camera_2)
-        #camera_grab(camera_2)
-        #print(frame)
-        #print(get_frame(camera_2))
 
         # test motion detection
         if prev_frame1 is not None:
@@ -161,9 +177,25 @@ def testing():
             movement_present2 = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
             print(movement_present2)
 
+        # try to write frames into a video
+        try:
+            img1 = convert_frame_format(frame1)
+            img2 = convert_frame_format(frame2)
+        except:
+            print("Cant convert Image Array Format.")
+        finally:
+            output1.write(img1)
+            output2.write(img2)
+
+        
+
+        
 
         prev_frame1 = frame1
         prev_frame2 = frame2
+
+
+
         # terminate loop
         frames -= 1
         if frames <= 0:
@@ -172,9 +204,9 @@ def testing():
     close_camera(camera_1)
     close_camera(camera_2)
 
-#testing()
+testing()
     
-create_video_name()
+
 
 
 

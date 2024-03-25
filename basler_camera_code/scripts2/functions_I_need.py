@@ -2,6 +2,7 @@
 from pypylon import pylon
 import cv2
 import numpy as np
+from datetime import datetime
 
 cam_serial_numbers = ["40357253", "40405187"]
 
@@ -84,7 +85,7 @@ def sum_motion(arr):
     """
     Sums up the array consisting of values showing change (0 vs 255).
     """
-    print(len(arr))
+    #print(len(arr))
     #print(np.sum(arr))
     #print((np.sum(arr)/len(arr)))
     return np.sum(arr)
@@ -99,62 +100,81 @@ def check_movement(motion_sum, thresh):
     
 # # # # THIS PART IS FOR VIDEO RECORDING # # # # 
     
-def create_video_name(cam):
-    pass
+def create_video_name():
+    current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     
-def setup_video_writer(video_name=str, cam):
+    
+def setup_video_writer(cam, video_name=str):
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     out = cv2.VideoWriter(video_name, fourcc, 30.0, (cam.Width.Value, cam.Height.Value))
     pass
 
 def write_frame_to_video():
     pass
+
+# # # # THIS PART IS FOR VISUALIZING CAMERAS # # # #
+
+def open_camera_window():
+    pass
+
+def open_motion_detection_window():
+    pass
+
+# # # # THIS PART IS FOR VISUALIZING CAMERAS # # # # 
     
 
+
+def testing():
+    camera_infos = get_camera_info()
+
+    # starts camera instance and opens the camera
+    camera_1 = camera_ini(camera_infos[0])
+    camera_2 = camera_ini(camera_infos[1])
+
+    # sets camera settings
+    camera_1 = camera_settings(camera_1)
+    camera_2 = camera_settings(camera_2)
+
+    # test code for recording
+    frames = 1000
+    recording = True
+    prev_frame1 = None
+    prev_frame2 = None
+    while recording:
+        if not camera_1.IsGrabbing():
+            camera_grab(camera_1)
+        frame1 = get_frame(camera_1)
+        if not camera_2.IsGrabbing():
+            camera_grab(camera_2)
+        frame2 = get_frame(camera_2)
+        #camera_grab(camera_2)
+        #print(frame)
+        #print(get_frame(camera_2))
+
+        # test motion detection
+        if prev_frame1 is not None:
+            motion = motion_detection(first_frame=prev_frame1, second_frame=frame1)
+            movement_present1 = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            print(movement_present1)
+        if prev_frame2 is not None:
+            motion = motion_detection(first_frame=prev_frame2, second_frame=frame2)
+            movement_present2 = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            print(movement_present2)
+
+
+        prev_frame1 = frame1
+        prev_frame2 = frame2
+        # terminate loop
+        frames -= 1
+        if frames <= 0:
+            recording = False
+
+    close_camera(camera_1)
+    close_camera(camera_2)
+
+#testing()
     
-
-
-
-
-
-# testing
-camera_infos = get_camera_info()
-
-# starts camera instance and opens the camera
-camera_1 = camera_ini(camera_infos[0])
-camera_2 = camera_ini(camera_infos[1])
-
-# sets camera settings
-camera_1 = camera_settings(camera_1)
-camera_2 = camera_settings(camera_2)
-
-# test code for recording
-frames = 1000
-recording = True
-prev_frame = None
-while recording:
-    if not camera_1.IsGrabbing():
-        camera_grab(camera_1)
-    #camera_grab(camera_2)
-    frame = get_frame(camera_1)
-    #print(frame)
-    #print(get_frame(camera_2))
-
-    # test motion detection
-    if prev_frame is not None:
-        motion = motion_detection(first_frame=prev_frame, second_frame=frame)
-        movement_present = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
-        #print(movement_present)
-
-    prev_frame = frame
-    # terminate loop
-    frames -= 1
-    if frames <= 0:
-        recording = False
-
-close_camera(camera_1)
-#close_camera(camera_2)
-
+create_video_name()
 
 
 

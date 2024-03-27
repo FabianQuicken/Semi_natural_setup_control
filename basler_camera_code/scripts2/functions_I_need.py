@@ -139,14 +139,64 @@ def display_frames(names=list, frames=list):
 
 
 # # # # THIS PART IS FOR VISUALIZING CAMERAS # # # # 
+        
+# # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
+
+def record_while_mov(movement_present, cams=list, mov_check_window=1000):
+
+    frames = []
+    imgs = []
+    prev_frame = None
+    counter=mov_check_window
+    # video output needs to be defined
+
+    for _ in range(len(cams)):
+        frames.append(None)
+
+    while movement_present:
+        
+        # get the frames
+        for i in range(len(cams)):
+            if not cams[i].IsGrabbing():
+                camera_grab(cams[i])
+            frames[i] = get_frame(cams[i])
+
+        # constantly check movement in first camera
+        if prev_frame is not None:
+            motion = motion_detection(first_frame=prev_frame, second_frame=frames[0])
+            movement_present = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            print(movement_present)
+
+        # reset the counter if still movement there
+        if movement_present:
+            counter = 1000
+        prev_frame = frames[0]
+
+        # write the frames into a video
+        try:
+            for i in range(len(frames)):
+                imgs[i] = convert_frame_format(frames[i])
+        except:
+            print("Can't convert frames to image format for video writing.")
+
+        try:
+            for i in range(len(imgs)):
+                outputs[i].write(imgs[i])
+        except:
+            print("Could not write frame into videofile.")
+
+        # display frames + waitKey func
+            
+
+        # finally: go down with the counter and check update movement_present
+        counter -= 1
+        if counter == 0:
+            movement_present = False
 
 
-    
 
 
-
-
-
+# # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
 
 
 def testing():
@@ -174,7 +224,7 @@ def testing():
 
     while recording:
 
-        motion_detection_present = False
+        movement_present = False
 
         for i in range(len(cameras)):
             if not cameras[i].IsGrabbing():
@@ -186,6 +236,11 @@ def testing():
                 motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
                 movement_present = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)
                 print(movement_present)
+
+        if movement_present:
+
+
+
         try:
             try:
                 display_frames(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'], frames=frames+motion)

@@ -32,13 +32,14 @@ def camera_ini(info):
 
 
 # adjust camera settings
-def camera_settings(cam, height=1080, width=1920, fps=60, expo_time=10000):
+def camera_settings(cam, height=1080, width=1920, fps=30, expo_time=32000):
     """
     Changes the settings of the selected camera.
+    Height/Weight display pixel resolution, frames per second, exposure time in MICROseconds.
     """
     cam.Width.SetValue(width)  # Set width
     cam.Height.SetValue(height)  # Set height
-    cam.ExposureTime.SetValue(expo_time)  # Set exposure time in microseconds (e.g., 10 ms)
+    cam.ExposureTime.SetValue(expo_time)  # Set exposure time in MICROseconds (e.g., 10 ms)
     cam.AcquisitionFrameRateEnable.SetValue(True)
     cam.AcquisitionFrameRate.SetValue(fps)  # Set FPS (e.g., 30 frames per second)
     return cam
@@ -58,7 +59,7 @@ def get_frame(cam):
     """
     frame = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
     img = frame.Array
-    frame.Release()
+    #frame.Release()
     return img
 
 # Shut down cameras after a recording
@@ -124,19 +125,119 @@ def write_frame_to_video():
 
 # # # # THIS PART IS FOR VISUALIZING CAMERAS # # # #
 
-def open_camera_window():
-    pass
+def open_camera_windows(names=list):
+    for name in names:
+        cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(name, 720, 405)
 
-def open_motion_detection_window():
-    pass
+def display_frames(names=list, frames=list):
+    """
+    Frames can be displayed without opening a camera window aswell.
+    """
+    for i in range(len(frames)):
+        cv2.imshow(names[i], frames[i])
+
 
 # # # # THIS PART IS FOR VISUALIZING CAMERAS # # # # 
+
+
     
 
 
+
+
+
+
+
 def testing():
+
+    frames = [None, None]
+    prev_frames = [None, None]
+    motion = [None, None]
+    recording = True
+    video_names = [1,2]
+    outputs = [1,2]
+    imgs = [1,2]
+
+    camera_infos = get_camera_info()
+    cameras = [1, 2]
+
+    for i in range(len(cameras)):
+        cameras[i] = camera_ini(camera_infos[i])
+        cameras[i] = camera_settings(cameras[i])
+    
+    for i in range(len(cam_serial_numbers)):
+        video_names[i] = create_video_name(cam_serial_numbers[i])
+        outputs[i] = setup_video_writer(cam=cameras[i], video_name=video_names[i], fps=30)
+
+    open_camera_windows(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'])
+
+    while recording:
+
+        motion_detection_present = False
+
+        for i in range(len(cameras)):
+            if not cameras[i].IsGrabbing():
+                camera_grab(cameras[i])
+            frames[i] = get_frame(cameras[i])
+
+        for i in range(len(prev_frames)):
+            if prev_frames[i] is not None:
+                motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
+                movement_present = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)
+                print(movement_present)
+        try:
+            try:
+                display_frames(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'], frames=frames+motion)
+            except:
+                display_frames(names=['Camera 1', 'Camera 2'], frames=frames)
+        except:
+            print("Could not display frames.")
+            break
+
+        key = cv2.waitKey(1)
+        if key & 0xFF == ord('q'):
+            break
+
+        try:
+            for i in range(len(frames)):
+                imgs[i] = convert_frame_format(frames[i])
+        except:
+            print("Can't convert frames to image format for video writing.")
+
+        try:
+            for i in range(len(imgs)):
+                outputs[i].write(imgs[i])
+        except:
+            print("Could not write frame into videofile.")
+        
+            
+        for i in range(len(prev_frames)):
+            prev_frames[i] = frames[i]
+
+    for i in range(len(cameras)):
+        close_camera(cameras[i])
+
+testing()
+    
+    
+
+
+
+
+
+
+
+
+def testing_old():
+    """
+    old testing function
+    """
     camera_infos = get_camera_info()
 
+    cameras = [1, 2]
+    frames = [None, None]
+    
     # starts camera instance and opens the camera
     camera_1 = camera_ini(camera_infos[0])
     camera_2 = camera_ini(camera_infos[1])
@@ -146,67 +247,69 @@ def testing():
     camera_2 = camera_settings(camera_2)
 
     # test code for recording
-    frames = 300
+    counter = 1500
     recording = True
     prev_frame1 = None
     prev_frame2 = None
 
     # test video recording (setting up recorder)
     video_name1 = create_video_name(cam_serial_numbers[0])
-    output1 = setup_video_writer(cam=camera_1,video_name=video_name1,fps=60.0)
+    #output1 = setup_video_writer(cam=camera_1,video_name=video_name1,fps=30.0)
 
     video_name2 = create_video_name(cam_serial_numbers[1])
-    output2 = setup_video_writer(cam=camera_2,video_name=video_name2,fps=60.0)
+    #output2 = setup_video_writer(cam=camera_2,video_name=video_name2,fps=30.0)
 
-    
+    open_camera_windows(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'])
+
     while recording:
+        
         if not camera_1.IsGrabbing():
             camera_grab(camera_1)
         frame1 = get_frame(camera_1)
         if not camera_2.IsGrabbing():
             camera_grab(camera_2)
         frame2 = get_frame(camera_2)
-
+        
+        key = cv2.waitKey(1)
+        if key & 0xFF == ord('q'):
+            break
+        
         # test motion detection
         if prev_frame1 is not None:
-            motion = motion_detection(first_frame=prev_frame1, second_frame=frame1)
-            movement_present1 = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            motion1 = motion_detection(first_frame=prev_frame1, second_frame=frame1)
+            movement_present1 = check_movement(motion_sum=sum_motion(motion1), thresh=50000000)
             print(movement_present1)
         if prev_frame2 is not None:
-            motion = motion_detection(first_frame=prev_frame2, second_frame=frame2)
-            movement_present2 = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            motion2 = motion_detection(first_frame=prev_frame2, second_frame=frame2)
+            movement_present2 = check_movement(motion_sum=sum_motion(motion2), thresh=50000000)
             print(movement_present2)
-
+        try:
+            display_frames(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'], frames=[frame1, frame2, motion1, motion2])
+        except:
+            display_frames(names=['Camera 1', 'Camera 2'], frames=[frame1, frame2])
+        
+        """
         # try to write frames into a video
         try:
             img1 = convert_frame_format(frame1)
             img2 = convert_frame_format(frame2)
+            
         except:
             print("Cant convert Image Array Format.")
         finally:
             output1.write(img1)
             output2.write(img2)
 
-        
-
-        
-
+        """
         prev_frame1 = frame1
         prev_frame2 = frame2
 
-
-
         # terminate loop
-        frames -= 1
-        if frames <= 0:
+        counter -= 1
+        if counter <= 0:
             recording = False
-
+    
     close_camera(camera_1)
     close_camera(camera_2)
-
-testing()
     
-
-
-
-
+    cv2.destroyAllWindows()

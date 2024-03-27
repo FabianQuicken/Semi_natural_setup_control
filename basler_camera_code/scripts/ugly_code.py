@@ -2,8 +2,8 @@ from pypylon import pylon
 import cv2
 
 
-cv2.namedWindow("Camera 1", cv2.WINDOW_NORMAL)
-cv2.namedWindow("Camera 2", cv2.WINDOW_NORMAL)
+#cv2.namedWindow("Camera 1", cv2.WINDOW_NORMAL)
+#cv2.namedWindow("Camera 2", cv2.WINDOW_NORMAL)
 
 infos = []
 for i in pylon.TlFactory.GetInstance().EnumerateDevices():

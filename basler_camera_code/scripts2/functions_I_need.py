@@ -3,8 +3,11 @@ from pypylon import pylon
 import cv2
 import numpy as np
 from datetime import datetime
+import time
 
-cam_serial_numbers = ["40357253", "40405187"]
+cam_serial_numbers = ["40439818", "40357253", "40405188", "40405187"]
+cam_id_name = {"40439818": "top1", "40357253": "side1", "40405188": "top2", "40405187": "side2"}
+cam_name_id = {"top1": "40439818", "side1": "40357253", "top2": "40405188", "side2": "40405187"}
 
 # # # # THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
 
@@ -157,13 +160,17 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100):
     counter=mov_check_window # the counter will count down while no movement is present
     movement_present = None # will save the outcome of frame/prevframe absdiff as Bool
 
-    # opens camera windows of both cameras where movement was detected by main()
-    # also shows a window where the absdiff is visualized
-    open_camera_windows(names=[cam_ids[0], cam_ids[1], f'Motion cam {cam_ids[0]}'])
+    
 
     # video output needs to be defined
-    vid_name1 = create_video_name(cam_num=cam_ids[0]) # videoname based on cam1 id
-    vid_name2 = create_video_name(cam_num=cam_ids[1]) # videoname based on cam2 id
+    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
+    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
+    vid_name1 = create_video_name(cam_num=cam_1_name) # videoname based on cam1 name + id
+    vid_name2 = create_video_name(cam_num=cam_2_name) # videoname based on cam2 name + id
+
+    # opens camera windows of both cameras where movement was detected by main()
+    # also shows a window where the absdiff is visualized
+    open_camera_windows(names=[cam_1_name, cam_2_name, f'Motion cam {cam_1_name}'])
 
     # initializes a VideoWriter instance for each camera and saves them into a list
     out1 = setup_video_writer(cam=cams[0],video_name=vid_name1,fps=30)
@@ -207,9 +214,9 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100):
         # display frames + waitKey func
         try:
             try:
-                display_frames(names=[cam_ids[0], cam_ids[1], f'Motion cam {cam_ids[0]}'], frames=frames+[motion])
+                display_frames(names=[cam_1_name, cam_2_name, f'Motion cam {cam_1_name}'], frames=frames+[motion])
             except:
-                display_frames(names=[cam_ids[0], cam_ids[1]], frames=frames)
+                display_frames(names=[cam_1_name, cam_2_name], frames=frames)
         except:
             print("Could not display frames.")
             break
@@ -226,10 +233,63 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100):
             movement_present = False
         print(counter)
 
-
-
-
 # # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
+        
+# # # # THIS PART IS FOR CREATING CAMERA PAIRS # # # # 
+        
+def ini_cam_pair(module_num=int):
+    """
+    This func can be used to initialize a pair of related cameras.
+    Each camera will get initialized and its settings adjusted based on the camera_settings func.
+    Returns a list of both cameras, where the top camera is the first, and the side camera the second.
+    Depends on the cam_name_id dic, where camera name keys (e.g. top1, side1, top2, ...) 
+    and camera serial number values are stored.
+    """
+
+    module_num = str(module_num)
+    cameras = [None, None]
+    camera_infos = get_camera_info()
+
+    print(f"Looking for cams top{module_num}, side{module_num}...\n")
+    time.sleep(1)
+
+    try:
+        for i in range(len(camera_infos)):
+            if camera_infos[i].GetSerialNumber() == cam_name_id[f"top{module_num}"]:
+                cameras[0] = camera_ini(camera_infos[i]) # sets top camera as first element in list
+                cameras[0] = camera_settings(cameras[0]) # adjusts camera settings
+                # give user some feedback
+                print(f"Found cam: top{module_num} with SerialNum: {cam_name_id[f'top{module_num}']}!")
+                time.sleep(1)
+                
+            elif camera_infos[i].GetSerialNumber() == cam_name_id[f"side{module_num}"]:
+                cameras[1] = camera_ini(camera_infos[i]) # sets side camera as second element in list
+                cameras[1] = camera_settings(cameras[1]) # adjusts camera settings
+                # give user some feedback
+                print(f"Found cam: side{module_num} with SerialNum: {cam_name_id[f'side{module_num}']}!")
+                time.sleep(1)
+                
+            else:
+                # Gives info, if the cameras can't be found for the respective module.
+                print(f"No cameras found for module {module_num}.")
+                print(f"Tried to find cam: top{module_num} with SerialNum {cam_name_id[f'top{module_num}']} .\n")
+                print(f"Tried to find cam: side{module_num} with SerialNum {cam_name_id[f'side{module_num}']} .\n")
+                time.sleep(1)
+
+    except:
+        # print error if functionality of the try block is broken somehow
+        # check camera_ini and camera_settings func
+        # check if serial numbers and camera names are saved correctly
+        print("Error while initializing camera pair.")
+        time.sleep(1)
+
+    # cameras can get returned now 
+    finally:
+        return cameras
+
+# # # # THIS PART IS FOR CREATING CAMERA PAIRS # # # # 
+        
+
 
 
 def testing():
@@ -240,12 +300,15 @@ def testing():
     movement_present = [False, False]
     recording = True
 
+    """
     camera_infos = get_camera_info()
     cameras = [1, 2]
 
     for i in range(len(cameras)):
         cameras[i] = camera_ini(camera_infos[i])
         cameras[i] = camera_settings(cameras[i])
+    """
+    cameras = ini_cam_pair(module_num=2)
 
     #open_camera_windows(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'])
 

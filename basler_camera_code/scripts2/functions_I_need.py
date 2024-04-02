@@ -148,13 +148,13 @@ def display_frames(names=list, frames=list):
         
 # # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
 
-def record_while_mov(cams=list, cam_ids=list, mov_check_window=100):
+def record_while_mov(cams=list, cam_ids=list, mov_check_window=100, mov_thresh=50000000):
     """
     This function should be used with a camera pair as cams argument. The continuous 
     movement detection will run on one camera, but both will record a video. 
     Camera IDs are needed to create video names, their order should correspond to the cams order.
     The mov_check_window determines the number of frames that can be "movement free" without stopping
-    the recording.
+    the recording. The mov_thresh is used as thresh for the check_movement func.
     """
     # First, all parameters get initialized
     frames = [None, None] # grabbed frames will be stored here
@@ -193,7 +193,7 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100):
         # constantly check movement in first camera
         if prev_frame is not None:
             motion = motion_detection(first_frame=prev_frame, second_frame=frames[0])
-            movement_present = check_movement(motion_sum=sum_motion(motion), thresh=50000000)
+            movement_present = check_movement(motion_sum=sum_motion(motion), thresh=mov_thresh)
             print(movement_present)
 
         # reset the counter if still movement there
@@ -295,6 +295,35 @@ def ini_cam_pair(module_num=int):
         return cameras
 
 # # # # THIS PART IS FOR CREATING CAMERA PAIRS # # # # 
+
+
+
+# needs to grab two consecutive frames
+# should return true if movement present, false if not
+# should perform this on the top camera of a module
+    
+def check_mov_periodic(cams, thresh=50000000):
+    """
+    Checks if movement is present in the top camera of a 
+    passed camera module pair.
+    Returns true/false if movement is present/not present.
+    Based on the return, a decision can be made to record or video.
+    Threshold for movement detection can be set.
+    """
+
+    first_frame = None
+    second_frame = None
+
+    if not cams[0].IsGrabbing():
+                camera_grab(cams[0])
+    first_frame = get_frame(cams[0])
+    second_frame = get_frame(cams[0])
+    motion = motion_detection(first_frame=first_frame, second_frame=second_frame)
+    movement_present = check_movement(motion_sum=sum_motion(motion), thresh=thresh)
+    return movement_present
+
+# # # # THIs PART IS FOR AN INITIAL MOTION CHECK # # # # 
+
         
 
 
@@ -307,19 +336,22 @@ def testing():
     movement_present = [False, False]
     recording = True
 
-    cameras1 = ini_cam_pair(module_num=2)
+    cameras1 = ini_cam_pair(module_num=1)
 
     counter = 100
     while recording:
+       
+        movement_present[0] = check_mov_periodic(cams=cameras1)
 
-        for i in range(len(cameras1)):
-            if not cameras1[i].IsGrabbing():
-                camera_grab(cameras1[i])
-            frames[i] = get_frame(cameras1[i])
-        for i in range(len(prev_frames)):
-            if prev_frames[i] is not None:
-                motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
-                movement_present[i] = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)
+    #for i in range(len(cameras1)):
+            #if not cameras1[i].IsGrabbing():
+                #camera_grab(cameras1[i])
+            #frames[i] = get_frame(cameras1[i])
+    #for i in range(len(prev_frames)):
+            #if prev_frames[i] is not None:
+                #motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
+                #movement_present[i] = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)      
+
 
         # we later only use one camera of a pair for motion detection
         if movement_present[0]:

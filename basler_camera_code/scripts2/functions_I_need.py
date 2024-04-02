@@ -6,6 +6,9 @@ from datetime import datetime
 import time
 
 cam_serial_numbers = ["40439818", "40357253", "40405188", "40405187"]
+
+# camera names, that are physically written on the respective camera aswell
+# top1 and side1 should be used for module1 and so on
 cam_id_name = {"40439818": "top1", "40357253": "side1", "40405188": "top2", "40405187": "side2"}
 cam_name_id = {"top1": "40439818", "side1": "40357253", "top2": "40405188", "side2": "40405187"}
 
@@ -255,26 +258,30 @@ def ini_cam_pair(module_num=int):
 
     try:
         for i in range(len(camera_infos)):
+            # tries to find the top camera
             if camera_infos[i].GetSerialNumber() == cam_name_id[f"top{module_num}"]:
                 cameras[0] = camera_ini(camera_infos[i]) # sets top camera as first element in list
                 cameras[0] = camera_settings(cameras[0]) # adjusts camera settings
                 # give user some feedback
                 print(f"Found cam: top{module_num} with SerialNum: {cam_name_id[f'top{module_num}']}!")
                 time.sleep(1)
-                
-            elif camera_infos[i].GetSerialNumber() == cam_name_id[f"side{module_num}"]:
+
+            # tries to finde the side camera
+            if camera_infos[i].GetSerialNumber() == cam_name_id[f"side{module_num}"]:
                 cameras[1] = camera_ini(camera_infos[i]) # sets side camera as second element in list
                 cameras[1] = camera_settings(cameras[1]) # adjusts camera settings
                 # give user some feedback
                 print(f"Found cam: side{module_num} with SerialNum: {cam_name_id[f'side{module_num}']}!")
                 time.sleep(1)
-                
-            else:
-                # Gives info, if the cameras can't be found for the respective module.
-                print(f"No cameras found for module {module_num}.")
-                print(f"Tried to find cam: top{module_num} with SerialNum {cam_name_id[f'top{module_num}']} .\n")
-                print(f"Tried to find cam: side{module_num} with SerialNum {cam_name_id[f'side{module_num}']} .\n")
-                time.sleep(1)
+
+        # Gives info, if the cameras can't be found for the respective module.
+        if cameras[0] is None:
+            print(f"Cam not found. Tried to find cam: top{module_num} with SerialNum {cam_name_id[f'top{module_num}']} .\n")
+            time.sleep(1)
+        if cameras[1] is None:
+            print(f"Cam not found. Tried to find cam: side{module_num} with SerialNum {cam_name_id[f'side{module_num}']} .\n")
+            time.sleep(1)
+
 
     except:
         # print error if functionality of the try block is broken somehow
@@ -300,25 +307,15 @@ def testing():
     movement_present = [False, False]
     recording = True
 
-    """
-    camera_infos = get_camera_info()
-    cameras = [1, 2]
-
-    for i in range(len(cameras)):
-        cameras[i] = camera_ini(camera_infos[i])
-        cameras[i] = camera_settings(cameras[i])
-    """
-    cameras = ini_cam_pair(module_num=2)
-
-    #open_camera_windows(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'])
+    cameras1 = ini_cam_pair(module_num=2)
 
     counter = 100
     while recording:
 
-        for i in range(len(cameras)):
-            if not cameras[i].IsGrabbing():
-                camera_grab(cameras[i])
-            frames[i] = get_frame(cameras[i])
+        for i in range(len(cameras1)):
+            if not cameras1[i].IsGrabbing():
+                camera_grab(cameras1[i])
+            frames[i] = get_frame(cameras1[i])
         for i in range(len(prev_frames)):
             if prev_frames[i] is not None:
                 motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
@@ -327,7 +324,7 @@ def testing():
         # we later only use one camera of a pair for motion detection
         if movement_present[0]:
             #cv2.destroyAllWindows()
-            record_while_mov(cams=cameras,cam_ids=cam_serial_numbers)
+            record_while_mov(cams=cameras1,cam_ids=cam_serial_numbers)
             # for now, when movement was present in both cameras and the recording started, this hinders a second trigger of the 
             # record_while_mov with the same movement trigger
             for i in range(len(movement_present)):
@@ -344,8 +341,8 @@ def testing():
             recording = False
         print(f"total {counter}")
 
-    for i in range(len(cameras)):
-        close_camera(cameras[i])
+    for i in range(len(cameras1)):
+        close_camera(cameras1[i])
         
 
 testing()

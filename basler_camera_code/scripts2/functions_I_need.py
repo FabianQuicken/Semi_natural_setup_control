@@ -313,14 +313,16 @@ def check_mov_periodic(cams, thresh=50000000):
 
     first_frame = None
     second_frame = None
-
-    if not cams[0].IsGrabbing():
-                camera_grab(cams[0])
-    first_frame = get_frame(cams[0])
-    second_frame = get_frame(cams[0])
-    motion = motion_detection(first_frame=first_frame, second_frame=second_frame)
-    movement_present = check_movement(motion_sum=sum_motion(motion), thresh=thresh)
-    return movement_present
+    try:
+        if not cams[0].IsGrabbing():
+                    camera_grab(cams[0])
+        first_frame = get_frame(cams[0])
+        second_frame = get_frame(cams[0])
+        motion = motion_detection(first_frame=first_frame, second_frame=second_frame)
+        movement_present = check_movement(motion_sum=sum_motion(motion), thresh=thresh)
+        return movement_present
+    except:
+        print("Could not check for movement.")
 
 # # # # THIs PART IS FOR AN INITIAL MOTION CHECK # # # # 
 
@@ -336,12 +338,16 @@ def testing():
     movement_present = [False, False]
     recording = True
 
+    # initializes a camera pair based on the module number
     cameras1 = ini_cam_pair(module_num=1)
+    cameras2 = ini_cam_pair(module_num=2)
+    camera_pairs_list = [cameras1, cameras2]
+
 
     counter = 100
     while recording:
-       
-        movement_present[0] = check_mov_periodic(cams=cameras1)
+        for i in range(len(camera_pairs_list)):
+            movement_present[i] = check_mov_periodic(cams=camera_pairs_list[i])
 
     #for i in range(len(cameras1)):
             #if not cameras1[i].IsGrabbing():
@@ -352,8 +358,15 @@ def testing():
                 #motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
                 #movement_present[i] = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)      
 
-
+        for i in range(len(camera_pairs_list)):
+            if movement_present[i]:
+                record_while_mov(cams=camera_pairs_list[i], cam_ids=[cam_serial_numbers[i], cam_serial_numbers[i+1]])
+                movement_present[i] = False
+                prev_frames[i] = None
+                frames[i] = None
+                cv2.destroyAllWindows()
         # we later only use one camera of a pair for motion detection
+        """
         if movement_present[0]:
             #cv2.destroyAllWindows()
             record_while_mov(cams=cameras1,cam_ids=cam_serial_numbers)
@@ -364,6 +377,7 @@ def testing():
             for i in range(len(prev_frames)):
                 prev_frames[i] = None
                 frames[i] = None
+        """
 
         for i in range(len(prev_frames)):
             prev_frames[i] = frames[i]

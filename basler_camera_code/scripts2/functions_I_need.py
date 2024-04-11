@@ -6,6 +6,9 @@ from datetime import datetime
 import time
 
 cam_serial_numbers = ["40439818", "40357253", "40405188", "40405187"]
+fps = int(input("At what fps do you want to record?\n"))
+expo_time = int(input("What exposure time [milliseconds] do you want to set your cameras on?\n"))
+expo_time = expo_time*1000 
 
 # camera names, that are physically written on the respective camera aswell
 # top1 and side1 should be used for module1 and so on
@@ -38,7 +41,7 @@ def camera_ini(info):
 
 
 # adjust camera settings
-def camera_settings(cam, height=1080, width=1920, fps=30, expo_time=32000):
+def camera_settings(cam, height=1080, width=1920, fps=fps, expo_time=expo_time):
     """
     Changes the settings of the selected camera.
     Height/Weight display pixel resolution, frames per second, exposure time in MICROseconds.
@@ -65,7 +68,7 @@ def get_frame(cam):
     """
     frame = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
     img = frame.Array
-    #frame.Release()
+    frame.Release()
     return img
 
 # Shut down cameras after a recording
@@ -94,9 +97,6 @@ def sum_motion(arr):
     """
     Sums up the array consisting of values showing change (0 vs 255).
     """
-    #print(len(arr))
-    #print(np.sum(arr))
-    #print((np.sum(arr)/len(arr)))
     return np.sum(arr)
 
 def check_movement(motion_sum, thresh):
@@ -109,9 +109,9 @@ def check_movement(motion_sum, thresh):
     
 # # # # THIS PART IS FOR VIDEO RECORDING # # # # 
     
-def create_video_name(cam_num=str):
+def create_video_name(cam_num=str, paradigm="testing"):
     current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    video_name = current_time + "_" + str(cam_num) + ".avi"
+    video_name = current_time + "_" + paradigm + str(cam_num) + ".avi"
     return video_name
     
 def setup_video_writer(cam, video_name=str, fps=float):
@@ -143,12 +143,43 @@ def display_frames(names=list, frames=list):
     for i in range(len(frames)):
         cv2.imshow(names[i], frames[i])
 
+def observe_while_not_rec(cams=list, cam_ids=list):
+    frames = []
+    for i in range(len(cams)):
+        frames.append(None)
+    # video output needs to be defined
+    #cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
+    #cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
+
+    # opens camera windows of both cameras where movement was detected by main()
+    open_camera_windows(names=cam_ids)
+    try:
+        # get the frames
+        for i in range(len(cams)):
+            if not cams[i].IsGrabbing():
+                camera_grab(cams[i])
+            frames[i] = get_frame(cams[i])
+    except:
+        print("Grabbing frames not possible.")
+    try:
+        display_frames(names=cam_ids, frames=frames)
+
+    except:
+        print("Could not display frames.")
+
+    key = cv2.waitKey(1)
+    if key & 0xFF == ord('q'):
+        cv2.destroyAllWindows()
+        return False
+    else:
+        return True
+        
 
 # # # # THIS PART IS FOR VISUALIZING CAMERAS # # # # 
         
 # # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
 
-def record_while_mov(cams=list, cam_ids=list, mov_check_window=100, mov_thresh=50000000):
+def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=50000000):
     """
     This function should be used with a camera pair as cams argument. The continuous 
     movement detection will run on one camera, but both will record a video. 
@@ -176,12 +207,11 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100, mov_thresh=5
     open_camera_windows(names=[cam_1_name, cam_2_name, f'Motion cam {cam_1_name}'])
 
     # initializes a VideoWriter instance for each camera and saves them into a list
-    out1 = setup_video_writer(cam=cams[0],video_name=vid_name1,fps=30)
-    out2 = setup_video_writer(cam=cams[1],video_name=vid_name2,fps=30)
+    out1 = setup_video_writer(cam=cams[0],video_name=vid_name1,fps=fps)
+    out2 = setup_video_writer(cam=cams[1],video_name=vid_name2,fps=fps)
     outs = [out1, out2]
 
     while counter > 0:
-        print("recording...")
         try:
             # get the frames
             for i in range(len(cams)):
@@ -194,7 +224,7 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100, mov_thresh=5
         if prev_frame is not None:
             motion = motion_detection(first_frame=prev_frame, second_frame=frames[0])
             movement_present = check_movement(motion_sum=sum_motion(motion), thresh=mov_thresh)
-            print(movement_present)
+
 
         # reset the counter if still movement there
         if movement_present:
@@ -234,7 +264,7 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=100, mov_thresh=5
         counter -= 1
         if counter == 0:
             movement_present = False
-        print(counter)
+        
 
 # # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
         
@@ -266,6 +296,7 @@ def ini_cam_pair(module_num=int):
                 print(f"Found cam: top{module_num} with SerialNum: {cam_name_id[f'top{module_num}']}!")
                 time.sleep(1)
 
+        for i in range(len(camera_infos)):
             # tries to finde the side camera
             if camera_infos[i].GetSerialNumber() == cam_name_id[f"side{module_num}"]:
                 cameras[1] = camera_ini(camera_infos[i]) # sets side camera as second element in list
@@ -281,18 +312,17 @@ def ini_cam_pair(module_num=int):
         if cameras[1] is None:
             print(f"Cam not found. Tried to find cam: side{module_num} with SerialNum {cam_name_id[f'side{module_num}']} .\n")
             time.sleep(1)
-
+        if cameras[0] is not None and cameras[1] is not None:
+            return cameras
 
     except:
         # print error if functionality of the try block is broken somehow
         # check camera_ini and camera_settings func
         # check if serial numbers and camera names are saved correctly
         print("Error while initializing camera pair.")
+        #raise ValueError
         time.sleep(1)
 
-    # cameras can get returned now 
-    finally:
-        return cameras
 
 # # # # THIS PART IS FOR CREATING CAMERA PAIRS # # # # 
 
@@ -326,29 +356,117 @@ def check_mov_periodic(cams, thresh=50000000):
 
 # # # # THIs PART IS FOR AN INITIAL MOTION CHECK # # # # 
 
-        
+# # # # THIS PART IS FOR INITIALIZING ALL VARIABLES # # # #
 
+def ini_var():
+    paradigm = input("What paradigm will you record?\n")
+    modules = list(input("What modules will be used? If using module 1 & 2, type: 12\n"))
+    
+    
+    frames = []
+    prev_frames = []
+    movement_present = []
+    all_cams = []
+    camera_pairs_list = []
+
+
+    if '1' in modules:
+        try:
+            cameras1 = ini_cam_pair(module_num=1)
+            all_cams = all_cams + cameras1
+            camera_pairs_list.append(cameras1)
+        except:
+            print("Could not create first camera module.")
+    
+    if '2' in modules:
+        try:
+            cameras2 = ini_cam_pair(module_num=2)
+            all_cams = all_cams + cameras2
+            camera_pairs_list.append(cameras2)
+        except:
+            print("Could not create second camera module.")
+
+    if '3' in modules:
+        try:
+            cameras3 = ini_cam_pair(module_num=3)
+            all_cams = all_cams + cameras3
+            camera_pairs_list.append(cameras3)
+        except:
+            print("Could not create third camera module.")
+
+
+    for _ in range(len(camera_pairs_list)):
+        frames.append(None)
+        prev_frames.append(None)
+        movement_present.append(False) 
+    return paradigm, modules, frames, prev_frames, movement_present, all_cams, camera_pairs_list
+
+# # # # THIS PART IS FOR INITIALIZING ALL VARIABLES # # # #
+
+
+    
+paradigm, modules, frames, prev_frames, movement_present, all_cams, camera_pairs_list = ini_var()
 
 
 def testing():
+    
+    """
+    all_cams = []
+    camera_pairs_list = []
+    try:
+        cameras1 = ini_cam_pair(module_num=1)
+        all_cams = all_cams + cameras1
+        camera_pairs_list.append(cameras1)
+    except:
+        print("Could not create first camera module.")
+    try:
+        cameras2 = ini_cam_pair(module_num=2)
+        all_cams = all_cams + cameras2
+        camera_pairs_list.append(cameras2)
+    except:
+        print("Could not create second camera module.")
+    try:
+        cameras3 = ini_cam_pair(module_num=3)
+        all_cams = all_cams + cameras3
+        camera_pairs_list.append(cameras3)
+    except:
+        print("Could not create third camera module.")
+    frames = []
+    prev_frames = []
+    movement_present = []
+    for i in range(len(camera_pairs_list)):
+        frames.append(None)
+        prev_frames.append(None)
+        movement_present.append(False)
 
-    frames = [None, None]
-    prev_frames = [None, None]
-    motion = [None, None]
-    movement_present = [False, False]
+
+    #frames = [None, None]
+    #prev_frames = [None, None]
+    #motion = [None, None]
+    #movement_present = [False, False]
     recording = True
 
     # initializes a camera pair based on the module number
-    cameras1 = ini_cam_pair(module_num=1)
-    cameras2 = ini_cam_pair(module_num=2)
-    camera_pairs_list = [cameras1, cameras2]
+    #cameras1 = ini_cam_pair(module_num=1)
+    #cameras2 = ini_cam_pair(module_num=2)
+    #all_cams = cameras1 + cameras2
+    #camera_pairs_list = [cameras1, cameras2]
+    
+    """
 
-
-    counter = 100
+    display_frame_counter = 0
+    recording = True
     while recording:
+        if display_frame_counter % 1 == 0:
+        # here, an observer window for each camera should be opened
+            recording = observe_while_not_rec(cams=all_cams, cam_ids=cam_serial_numbers[0:len(all_cams)])
+        display_frame_counter += 1
+            
         for i in range(len(camera_pairs_list)):
+            
+            # checks the top camera of each camera pair for movement
             movement_present[i] = check_mov_periodic(cams=camera_pairs_list[i])
-
+        
     #for i in range(len(cameras1)):
             #if not cameras1[i].IsGrabbing():
                 #camera_grab(cameras1[i])
@@ -360,6 +478,7 @@ def testing():
 
         for i in range(len(camera_pairs_list)):
             if movement_present[i]:
+                cv2.destroyAllWindows()
                 record_while_mov(cams=camera_pairs_list[i], cam_ids=[cam_serial_numbers[i], cam_serial_numbers[i+1]])
                 movement_present[i] = False
                 prev_frames[i] = None
@@ -381,14 +500,14 @@ def testing():
 
         for i in range(len(prev_frames)):
             prev_frames[i] = frames[i]
-        
+        """
         counter -= 1
         if counter < 0:
             recording = False
         print(f"total {counter}")
-
-    for i in range(len(cameras1)):
-        close_camera(cameras1[i])
+        """
+    for i in range(len(all_cams)):
+        close_camera(all_cams[i])
         
 
 testing()
@@ -476,11 +595,12 @@ def testing_old():
         """
         prev_frame1 = frame1
         prev_frame2 = frame2
-
+        
         # terminate loop
         counter -= 1
         if counter <= 0:
             recording = False
+        
     
     close_camera(camera_1)
     close_camera(camera_2)

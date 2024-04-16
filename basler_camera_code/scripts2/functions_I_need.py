@@ -15,6 +15,25 @@ expo_time = expo_time*1000
 cam_id_name = {"40439818": "top1", "40357253": "side1", "40405188": "top2", "40405187": "side2"}
 cam_name_id = {"top1": "40439818", "side1": "40357253", "top2": "40405188", "side2": "40405187"}
 
+# here I bring the cam ids in a module format, like the cameras
+cam_id_pairs = []
+try:
+    cam_ids_module1 = [cam_name_id["top1"], cam_name_id["side1"]]
+    cam_id_pairs.append(cam_ids_module1)
+except:
+    print('Could not write cam_ids of module 1 in list')
+try:
+    cam_ids_module2 = [cam_name_id["top2"], cam_name_id["side2"]]
+    cam_id_pairs.append(cam_ids_module2)
+except:
+    print('Could not write cam_ids of module 2 in list')
+try:
+    cam_ids_module3 = [cam_name_id["top3"], cam_name_id["side3"]]
+    cam_id_pairs.append(cam_ids_module3)
+except:
+    print('Could not write cam_ids of module 3 in list')
+print(cam_id_pairs)
+
 # # # # THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
 
 # find cameras and load their infos
@@ -194,7 +213,8 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=5
     counter=mov_check_window # the counter will count down while no movement is present
     movement_present = None # will save the outcome of frame/prevframe absdiff as Bool
 
-    
+    print(f"This is cam ids: {cam_ids}")
+    print(f"This is cam ids 0: {cam_ids[0]}")
 
     # video output needs to be defined
     cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
@@ -404,7 +424,7 @@ def ini_var():
 # # # # THIS PART IS FOR INITIALIZING ALL VARIABLES # # # #
 
 
-    
+
 paradigm, modules, frames, prev_frames, movement_present, all_cams, camera_pairs_list = ini_var()
 
 
@@ -474,12 +494,13 @@ def testing():
     #for i in range(len(prev_frames)):
             #if prev_frames[i] is not None:
                 #motion[i] = motion_detection(first_frame=prev_frames[i], second_frame=frames[i])
-                #movement_present[i] = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)      
+                #movement_present[i] = check_movement(motion_sum=sum_motion(motion[i]), thresh=50000000)
+        
 
         for i in range(len(camera_pairs_list)):
             if movement_present[i]:
                 cv2.destroyAllWindows()
-                record_while_mov(cams=camera_pairs_list[i], cam_ids=[cam_serial_numbers[i], cam_serial_numbers[i+1]])
+                record_while_mov(cams=camera_pairs_list[i], cam_ids=cam_id_pairs[i])
                 movement_present[i] = False
                 prev_frames[i] = None
                 frames[i] = None
@@ -500,12 +521,7 @@ def testing():
 
         for i in range(len(prev_frames)):
             prev_frames[i] = frames[i]
-        """
-        counter -= 1
-        if counter < 0:
-            recording = False
-        print(f"total {counter}")
-        """
+
     for i in range(len(all_cams)):
         close_camera(all_cams[i])
         
@@ -520,89 +536,3 @@ testing()
 
 
 
-
-def testing_old():
-    """
-    old testing function
-    """
-    camera_infos = get_camera_info()
-
-    cameras = [1, 2]
-    frames = [None, None]
-    
-    # starts camera instance and opens the camera
-    camera_1 = camera_ini(camera_infos[0])
-    camera_2 = camera_ini(camera_infos[1])
-
-    # sets camera settings
-    camera_1 = camera_settings(camera_1)
-    camera_2 = camera_settings(camera_2)
-
-    # test code for recording
-    counter = 1500
-    recording = True
-    prev_frame1 = None
-    prev_frame2 = None
-
-    # test video recording (setting up recorder)
-    video_name1 = create_video_name(cam_serial_numbers[0])
-    #output1 = setup_video_writer(cam=camera_1,video_name=video_name1,fps=30.0)
-
-    video_name2 = create_video_name(cam_serial_numbers[1])
-    #output2 = setup_video_writer(cam=camera_2,video_name=video_name2,fps=30.0)
-
-    open_camera_windows(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'])
-
-    while recording:
-        
-        if not camera_1.IsGrabbing():
-            camera_grab(camera_1)
-        frame1 = get_frame(camera_1)
-        if not camera_2.IsGrabbing():
-            camera_grab(camera_2)
-        frame2 = get_frame(camera_2)
-        
-        key = cv2.waitKey(1)
-        if key & 0xFF == ord('q'):
-            break
-        
-        # test motion detection
-        if prev_frame1 is not None:
-            motion1 = motion_detection(first_frame=prev_frame1, second_frame=frame1)
-            movement_present1 = check_movement(motion_sum=sum_motion(motion1), thresh=50000000)
-            print(movement_present1)
-        if prev_frame2 is not None:
-            motion2 = motion_detection(first_frame=prev_frame2, second_frame=frame2)
-            movement_present2 = check_movement(motion_sum=sum_motion(motion2), thresh=50000000)
-            print(movement_present2)
-        try:
-            display_frames(names=['Camera 1', 'Camera 2', 'Motion 1', 'Motion 2'], frames=[frame1, frame2, motion1, motion2])
-        except:
-            display_frames(names=['Camera 1', 'Camera 2'], frames=[frame1, frame2])
-        
-        """
-        # try to write frames into a video
-        try:
-            img1 = convert_frame_format(frame1)
-            img2 = convert_frame_format(frame2)
-            
-        except:
-            print("Cant convert Image Array Format.")
-        finally:
-            output1.write(img1)
-            output2.write(img2)
-
-        """
-        prev_frame1 = frame1
-        prev_frame2 = frame2
-        
-        # terminate loop
-        counter -= 1
-        if counter <= 0:
-            recording = False
-        
-    
-    close_camera(camera_1)
-    close_camera(camera_2)
-    
-    cv2.destroyAllWindows()

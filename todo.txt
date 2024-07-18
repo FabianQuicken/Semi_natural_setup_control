@@ -1,0 +1,14 @@
+motion_detection func:
+- detect motion change (cs2.absdiff)
+- make the threshold adjustable with cv2.threshold
+- sum up the change that exceeds the threshold and return true if change is significant enough
+- pass an argument to the func that allows to open a window to visualize the motion detection
+
+in a loop, test motion detection for each camera (maybe only for top or side camera?)
+
+introduce a "module" class?
+class can contain cameras
+
+record_video func:
+- when motion_detection returns true, video should be record_video
+- both cameras for the module should be activated

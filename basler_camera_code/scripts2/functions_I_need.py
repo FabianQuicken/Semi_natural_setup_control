@@ -12,8 +12,12 @@ expo_time = expo_time*1000
 
 # camera names, that are physically written on the respective camera aswell
 # top1 and side1 should be used for module1 and so on
-cam_id_name = {"40439818": "top1", "40357253": "side1", "40405188": "top2", "40405187": "side2"}
-cam_name_id = {"top1": "40439818", "side1": "40357253", "top2": "40405188", "side2": "40405187"}
+cam_id_name = {"40405188": "top1", "40405187": "side1", "40439818": "top2", "40405187": "side2"}
+cam_name_id = {"top1": "40405188", "side1": "40405187", "top2": "40439818", "side2": "40405187"}
+
+# ursprüngliche cam_id_name: {"40439818": "top1", "40357253": "side1", "40405188": "top2", "40405187": "side2"}
+# ursprüngliche cam_name_id: {"top1": "40439818", "side1": "40357253", "top2": "40405188", "side2": "40405187"}
+
 
 # here I bring the cam ids in a module format, like the cameras
 cam_id_pairs = []
@@ -34,7 +38,8 @@ except:
     print('Could not write cam_ids of module 3 in list')
 print(cam_id_pairs)
 
-# # # # THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
+
+# # # # START: THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
 
 # find cameras and load their infos
 def get_camera_info():
@@ -64,6 +69,7 @@ def camera_settings(cam, height=1080, width=1920, fps=fps, expo_time=expo_time):
     """
     Changes the settings of the selected camera.
     Height/Weight display pixel resolution, frames per second, exposure time in MICROseconds.
+    Default resolution is Full HD.
     """
     cam.Width.SetValue(width)  # Set width
     cam.Height.SetValue(height)  # Set height
@@ -76,6 +82,7 @@ def camera_settings(cam, height=1080, width=1920, fps=fps, expo_time=expo_time):
 def camera_grab(cam):
     """
     Camera starts grabbing frames based on the LatestImageOnly strategy.
+    Note: LatestImageOnly is memory friendly, but frames might be missed.
     """
     cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
@@ -85,9 +92,9 @@ def get_frame(cam):
     A grab result based on a strategy (see camera_grab()) is retrieved. The Camera waits a maximum of 5000 ms for a grab, 
     this value can be adjusted. The result gets transformed by .Array. 
     """
-    frame = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
-    img = frame.Array
-    frame.Release()
+    frame = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException) # retrieves 'GrabResult' object (holds image data)
+    img = frame.Array # saves image data as array
+    frame.Release() # releases the resources bound by the RetrieveResult object to prevent memory clugging
     return img
 
 # Shut down cameras after a recording
@@ -95,9 +102,9 @@ def close_camera(cam):
     cam.StopGrabbing()
     cam.Close()
 
-# # # # THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
+# # # # END: THIS PART IS FOR PYLON TO RUN THE CAMERAS AND GET FRAMES # # # #
     
-# # # # THIS PART IS FOR DOING THE MOTION DETECTION # # # #
+# # # # START: THIS PART IS FOR DOING THE MOTION DETECTION # # # #
     
 # calculate the difference between consecutive frames
 def motion_detection(first_frame, second_frame, change_thresh = 10):
@@ -124,21 +131,33 @@ def check_movement(motion_sum, thresh):
     elif motion_sum <= thresh:
         return False
     
-# # # # THIS PART IS FOR DOING THE MOTION DETECTION # # # #
+# # # # END: THIS PART IS FOR DOING THE MOTION DETECTION # # # #
     
-# # # # THIS PART IS FOR VIDEO RECORDING # # # # 
+# # # # START: THIS PART IS FOR VIDEO RECORDING # # # # 
     
 def create_video_name(cam_num=str, paradigm="testing"):
-    current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    video_name = current_time + "_" + paradigm + str(cam_num) + ".avi"
+    """
+    This func generates the current daytime to generate a useful savename for generated videos.
+    It returns the name based on this template: YYYY_MM_DD_HH_MM_SS_paradigmname_camname.avi
+    """
+    current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") # gets current date (from year to second, converted to a string and split by '_'.)
+    video_name = current_time + "_" + paradigm + "_" + str(cam_num) + ".avi" # constructs a video name string
     return video_name
     
 def setup_video_writer(cam, video_name=str, fps=float):
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(video_name, fourcc, fps, (cam.Width.Value, cam.Height.Value))
+    """
+    This func configures a video writer object, allowing to save video frames to a file.
+    It takes the used camera object, a video name (see create_video_name()) and the fps setting as arguments.
+    It returns the VideoWriter object.
+    """
+    fourcc = cv2.VideoWriter_fourcc(*'XVID') # generates FourCharacterCode specifiying the codec to compress frames, XVID is common for .avi
+    out = cv2.VideoWriter(video_name, fourcc, fps, (cam.Width.Value, cam.Height.Value)) # constructs the VideoWriter object
     return out
 
 def convert_frame_format(img):
+    """
+    
+    """
     if len(img.shape) == 2:
         # Convert grayscale to BGR format
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -161,6 +180,7 @@ def display_frames(names=list, frames=list):
     """
     for i in range(len(frames)):
         cv2.imshow(names[i], frames[i])
+        
 
 def observe_while_not_rec(cams=list, cam_ids=list):
     frames = []
@@ -198,7 +218,7 @@ def observe_while_not_rec(cams=list, cam_ids=list):
         
 # # # # THIS PART IS FOR STARTING AND CONTROLLING A RECORDING WHEN MOVEMENT IS PRESENT # # # # 
 
-def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=50000000):
+def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=500000000):
     """
     This function should be used with a camera pair as cams argument. The continuous 
     movement detection will run on one camera, but both will record a video. 
@@ -352,7 +372,7 @@ def ini_cam_pair(module_num=int):
 # should return true if movement present, false if not
 # should perform this on the top camera of a module
     
-def check_mov_periodic(cams, thresh=50000000):
+def check_mov_periodic(cams, thresh=500000000):
     """
     Checks if movement is present in the top camera of a 
     passed camera module pair.
@@ -374,7 +394,7 @@ def check_mov_periodic(cams, thresh=50000000):
     except:
         print("Could not check for movement.")
 
-# # # # THIs PART IS FOR AN INITIAL MOTION CHECK # # # # 
+# # # # THIS PART IS FOR AN INITIAL MOTION CHECK # # # # 
 
 # # # # THIS PART IS FOR INITIALIZING ALL VARIABLES # # # #
 
@@ -451,14 +471,18 @@ def testing():
         camera_pairs_list.append(cameras3)
     except:
         print("Could not create third camera module.")
+
+    print(f"camera pairs list: {camera_pairs_list}")
+
     frames = []
     prev_frames = []
     movement_present = []
+    
     for i in range(len(camera_pairs_list)):
         frames.append(None)
         prev_frames.append(None)
         movement_present.append(False)
-
+    """
 
     #frames = [None, None]
     #prev_frames = [None, None]
@@ -472,7 +496,7 @@ def testing():
     #all_cams = cameras1 + cameras2
     #camera_pairs_list = [cameras1, cameras2]
     
-    """
+    
 
     display_frame_counter = 0
     recording = True

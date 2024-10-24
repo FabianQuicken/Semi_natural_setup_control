@@ -9,6 +9,7 @@ import cv2
 
 cam_serial_numbers = ["40439818", "40357253", "40405188", "40405187"]
 fps = int(input("At what fps do you want to record?\n"))
+paradigm = int(input("How should the paradigm be named?"))
 
 
 # camera names, that are physically written on the respective camera aswell
@@ -73,7 +74,7 @@ def testing():
         for i in range(len(camera_pairs_list)):
             if movement_present[i]:
                 cv2.destroyAllWindows()
-                record_while_mov(cams=camera_pairs_list[i], cam_ids=cam_id_pairs[i])
+                record_while_mov(cams=camera_pairs_list[i], cam_ids=cam_id_pairs[i], paradigm=paradigm)
                 movement_present[i] = False
                 prev_frames[i] = None
                 frames[i] = None
@@ -83,7 +84,7 @@ def testing():
         # look out if the experimenter wants to record a video
         key = cv2.waitKey(1)
         if key & 0xFF == ord('r'):
-            record_video(cams=camera_pairs_list[i], cam_ids=cam_id_pairs[i])
+            record_video(cams=camera_pairs_list[i], cam_ids=cam_id_pairs[i], paradigm=paradigm)
 
 
         for i in range(len(prev_frames)):

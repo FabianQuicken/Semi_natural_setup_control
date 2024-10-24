@@ -7,7 +7,7 @@ from variables import cam_id_name, fps
 
 
 
-def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=500000000):
+def record_while_mov(cams=list, cam_ids=list, paradigm=str, mov_check_window=300, mov_thresh=500000000):
     """
     This function should be used with a camera pair as cams argument. The continuous 
     movement detection will run on one camera, but both will record a video. 
@@ -26,8 +26,8 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=5
     print(f"This is cam ids 0: {cam_ids[0]}")
 
     # video output needs to be defined
-    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
-    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
+    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0] + '_' + paradigm
+    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1] + '_' + paradigm
     vid_name1 = create_video_name(cam_num=cam_1_name) # videoname based on cam1 name + id
     vid_name2 = create_video_name(cam_num=cam_2_name) # videoname based on cam2 name + id
 
@@ -95,7 +95,7 @@ def record_while_mov(cams=list, cam_ids=list, mov_check_window=300, mov_thresh=5
             movement_present = False
         
 
-def record_video(cams=list, cam_ids=list, fps=fps):
+def record_video(cams=list, cam_ids=list, paradigm=str, fps=fps):
     """
     This function should be used with a camera pair as cams argument. The recording should be 30 seconds in length. 
     Camera IDs are needed to create video names, their order should correspond to the cams order.
@@ -113,8 +113,8 @@ def record_video(cams=list, cam_ids=list, fps=fps):
     print(f"This is cam ids 0: {cam_ids[0]}")
 
     # video output needs to be defined
-    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
-    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
+    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0] + '_' + paradigm
+    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1] + '_' + paradigm
     vid_name1 = create_video_name(cam_num=cam_1_name) # videoname based on cam1 name + id
     vid_name2 = create_video_name(cam_num=cam_2_name) # videoname based on cam2 name + id
 

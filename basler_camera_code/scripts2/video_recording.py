@@ -2,7 +2,11 @@ from datetime import datetime
 import cv2
 
 
+<<<<<<< HEAD
 def create_video_name(cam_num=str, paradigm=str):
+=======
+def create_video_name(cam_num=str, paradigm="testing"):
+>>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     """
     This func generates the current daytime to generate a useful savename for generated videos.
     It returns the name based on this template: YYYY_MM_DD_HH_MM_SS_paradigmname_camname.avi

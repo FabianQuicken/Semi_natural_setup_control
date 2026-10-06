@@ -7,7 +7,7 @@ from initialize_variables import ini_var
 from variables import cam_name_id
 import cv2
 
-cam_serial_numbers = ["40439818", "40357253", "40405188", "40405187"]
+cam_serial_numbers = ["40439817", "40357253", "40405188", "40405187"]
 fps = int(input("At what fps do you want to record?\n"))
 
 #paradigm = str(input("How should the paradigm be named?"))
@@ -45,7 +45,7 @@ print(cam_id_pairs)
 paradigm, modules, frames, prev_frames, movement_present, all_cams, camera_pairs_list = ini_var()
 
 
-def testing():
+def main():
 
     #frames = [None, None]
     #prev_frames = [None, None]
@@ -98,7 +98,7 @@ def testing():
         close_camera(all_cams[i])
         
 
-testing()
+main()
     
     
 

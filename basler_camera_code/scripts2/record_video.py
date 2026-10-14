@@ -7,11 +7,7 @@ from variables import cam_id_name, fps
 
 
 
-<<<<<<< HEAD
 def record_while_mov(cams=list, cam_ids=list, paradigm=str, mov_check_window=150, mov_thresh=10000, split_recordings=False, recording_len= fps*600):
-=======
-def record_while_mov(cams=list, cam_ids=list, paradigm=str, mov_check_window=300, mov_thresh=500000000):
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     """
     This function should be used with a camera pair as cams argument. The continuous 
     movement detection will run on one camera, but both will record a video. 
@@ -25,26 +21,16 @@ def record_while_mov(cams=list, cam_ids=list, paradigm=str, mov_check_window=300
     prev_frame = None # this will be used to save a frame for the next iteration
     counter=mov_check_window # the counter will count down while no movement is present
     movement_present = None # will save the outcome of frame/prevframe absdiff as Bool
-<<<<<<< HEAD
     remaining_len = recording_len
-=======
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 
     print(f"This is cam ids: {cam_ids}")
     print(f"This is cam ids 0: {cam_ids[0]}")
 
     # video output needs to be defined
-<<<<<<< HEAD
     cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
     cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
     vid_name1 = create_video_name(cam_num=cam_1_name, paradigm=paradigm) # videoname based on cam1 name + id
     vid_name2 = create_video_name(cam_num=cam_2_name, paradigm=paradigm) # videoname based on cam2 name + id
-=======
-    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0] + '_' + paradigm
-    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1] + '_' + paradigm
-    vid_name1 = create_video_name(cam_num=cam_1_name) # videoname based on cam1 name + id
-    vid_name2 = create_video_name(cam_num=cam_2_name) # videoname based on cam2 name + id
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 
     # opens camera windows of both cameras where movement was detected by main()
     # also shows a window where the absdiff is visualized
@@ -106,23 +92,16 @@ def record_while_mov(cams=list, cam_ids=list, paradigm=str, mov_check_window=300
 
         # finally: go down with the counter and check update movement_present
         counter -= 1
-<<<<<<< HEAD
         if split_recordings:
             remaining_len -= 1
             if remaining_len == 0:
                 counter = 0
 
-=======
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
         if counter == 0:
             movement_present = False
         
 
-<<<<<<< HEAD
 def record_video(cams=list, cam_ids=list, paradigm=str, fps=fps, videolength_in_seconds=int):
-=======
-def record_video(cams=list, cam_ids=list, paradigm=str, fps=fps):
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     """
     This function should be used with a camera pair as cams argument. The recording should be 30 seconds in length. 
     Camera IDs are needed to create video names, their order should correspond to the cams order.
@@ -133,28 +112,17 @@ def record_video(cams=list, cam_ids=list, paradigm=str, fps=fps):
     frames = [None, None] # grabbed frames will be stored here
     imgs = [None, None] # transformed grabbed frames will be stored here
     prev_frame = None # this will be used to save a frame for the next iteration
-<<<<<<< HEAD
     counter=videolength_in_seconds*fps # counter will be set to 30 seconds
-=======
-    counter=30*fps # counter will be set to 30 seconds
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 
 
     print(f"This is cam ids: {cam_ids}")
     print(f"This is cam ids 0: {cam_ids[0]}")
 
     # video output needs to be defined
-<<<<<<< HEAD
     cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0]
     cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1]
     vid_name1 = create_video_name(cam_num=cam_1_name, paradigm=paradigm) # videoname based on cam1 name + id
     vid_name2 = create_video_name(cam_num=cam_2_name, paradigm=paradigm) # videoname based on cam2 name + id
-=======
-    cam_1_name = cam_id_name[cam_ids[0]] + '_' + cam_ids[0] + '_' + paradigm
-    cam_2_name = cam_id_name[cam_ids[1]] + '_' + cam_ids[1] + '_' + paradigm
-    vid_name1 = create_video_name(cam_num=cam_1_name) # videoname based on cam1 name + id
-    vid_name2 = create_video_name(cam_num=cam_2_name) # videoname based on cam2 name + id
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 
     # opens camera windows of both cameras where movement was detected by main()
     # also shows a window where the absdiff is visualized
@@ -207,7 +175,3 @@ def record_video(cams=list, cam_ids=list, paradigm=str, fps=fps):
 
         # finally: go down with the counter and check update movement_present
         counter -= 1
-<<<<<<< HEAD
-=======
-
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f

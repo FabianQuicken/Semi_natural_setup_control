@@ -2,7 +2,6 @@
 
 THIS .py CONTAINS FUNCTIONS THAT CONTROL BASLER CAMERAS
 
-
 """
 
 from pypylon import pylon

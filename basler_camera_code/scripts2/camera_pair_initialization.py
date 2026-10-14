@@ -19,12 +19,9 @@ def ini_cam_pair(module_num=int):
 
 
     print(f"Looking for cams top{module_num}, side{module_num}...\n")
-<<<<<<< HEAD
     print(f"Following cameras found:")
     for i in range(len(camera_infos)):
         print(camera_infos[i].GetSerialNumber())
-=======
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     time.sleep(1)
 
     try:

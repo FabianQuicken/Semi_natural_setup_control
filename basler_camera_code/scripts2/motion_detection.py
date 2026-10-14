@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-=======
-
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 import cv2
 import numpy as np
 from camera_control import camera_grab, get_frame
 
 # calculate the difference between consecutive frames
-<<<<<<< HEAD
 def motion_detection(first_frame, second_frame, change_thresh = 20):
-=======
-def motion_detection(first_frame, second_frame, change_thresh = 10):
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     """
     The func takes two frames that should be consecutive frames of the same camera. 
     It calculates the absolute difference for all pixels in the frame. 
@@ -20,10 +12,7 @@ def motion_detection(first_frame, second_frame, change_thresh = 10):
     Note: Images need to be binary, so only one color channel (black/white).
     """
     diff_frame = cv2.absdiff(first_frame, second_frame)
-<<<<<<< HEAD
     
-=======
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
 
     _, thresh = cv2.threshold(diff_frame, change_thresh, 255, cv2.THRESH_BINARY)
     return thresh
@@ -32,10 +21,7 @@ def sum_motion(arr):
     """
     Sums up the array consisting of values showing change (0 vs 255).
     """
-<<<<<<< HEAD
     
-=======
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     return np.sum(arr)
 
 def check_movement(motion_sum, thresh):
@@ -48,11 +34,7 @@ def check_movement(motion_sum, thresh):
 # should return true if movement present, false if not
 # should perform this on the top camera of a module
     
-<<<<<<< HEAD
 def check_mov_periodic(cams, thresh=200000):
-=======
-def check_mov_periodic(cams, thresh=500000):
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f
     """
     Checks if movement is present in the top camera of a 
     passed camera module pair.
@@ -77,14 +59,7 @@ def check_mov_periodic(cams, thresh=500000):
     movement_present = check_movement(motion_sum=sum_motion(motion), thresh=thresh)
 
     return movement_present
-<<<<<<< HEAD
 """
     except:
         print("Could not check for movement.")
 """
-=======
-    """
-    except:
-        print("Could not check for movement.")
-    """
->>>>>>> 10e8562caf9ce6e2bf7ac95a2c65204e6dbf826f

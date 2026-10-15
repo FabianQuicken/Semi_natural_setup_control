@@ -1,0 +1,994 @@
+ERKLÄRUNG DES CODES IN optimized_recording/
+=========================================
+Stand: 15. Oktober 2026
+Zielgruppe: Programmieranfänger bis Programmierer mit mittleren Kenntnissen.
+
+Diese Erklärung beschreibt den vorliegenden Quellcode. Sie ist keine Zusage,
+dass eine bestimmte Kamera oder Festplatte die gewünschten Bildraten erreicht.
+Es wurden für diese Dokumentation keine Kameras gestartet und keine Messungen
+an Hardware durchgeführt. Die Python-Dateien wurden nicht verändert.
+
+INHALT
+1. Aufgabe und Aufbau des Programms
+2. Python- und Kamerabegriffe zum Mitlesen
+3. Der Weg eines Bildes durch das Programm
+4. core.py: sämtliche Klassen und Funktionen
+5. run_single_module.py: Start, Kameraanbindung und Steuerung
+6. verify_videos.py: nachträgliche Videoprüfung
+7. test_recording.py: sämtliche Tests und Hilfsklassen
+8. Einstellungen der Kommandozeile
+9. Ausgabedateien und Diagnosewerte verstehen
+10. Beispiele, Grenzen und Orientierung für Änderungen
+
+
+1. AUFGABE UND AUFBAU DES PROGRAMMS
+==================================
+
+Das Programm zeichnet zwei Kameras eines Versuchsmoduls auf: eine Kamera von
+oben (top) und eine von der Seite (side). Ein gestarteter Python-Prozess betreut
+genau dieses Kamerapaar. Für zwei Versuchsmodule startet man zwei Prozesse mit
+unterschiedlichen Kameraseriennummern.
+
+Es gibt zwei Betriebsarten:
+
+  motion: Die obere Kamera erkennt Bildänderungen. Diese schalten die Aufnahme
+          für beide Kameras frei. Nach einer einstellbaren Zeit ohne erkannte
+          Bewegung endet die Aufnahmefreigabe.
+  continuous: Beide Kameras werden durchgehend aufgezeichnet.
+
+Die Kameras liefern auch im motion-Modus während einer Aufnahmepause weiter
+Bilder. Nur das Speichern wird ausgesetzt. Sonst könnte die obere Kamera keine
+neue Bewegung entdecken. Lange Aufnahmen werden in mehrere Videodateien geteilt.
+
+Das Design verfolgt zwei Zwecke: Die Kameraabholung möglichst wenig durch
+Videokompression ausbremsen und mögliche Bildverluste sichtbar machen.
+
+Die Dateien haben folgende Aufgaben:
+
+  core.py
+    Wiederverwendbare Bausteine: Bilder zählen, Aufnahme freigeben, Bewegung
+    erkennen, Videos schreiben, JSON speichern und Videos nachprüfen.
+    Diese Datei kennt keine echte Basler-Kamera und importiert kein pypylon.
+
+  run_single_module.py
+    Das eigentliche Startprogramm. Liest Optionen, öffnet Kameras, startet
+    Threads, zeigt auf Wunsch eine Vorschau und organisiert das Beenden.
+
+  verify_videos.py
+    Kleines Startprogramm für eine separate Prüfung vorhandener Aufnahmen.
+
+  test_recording.py
+    Automatische Tests mit künstlichen Bildern und nachgebildeten Kameras.
+
+  requirements.txt
+    Benötigte Zusatzpakete: numpy>=1.24, opencv-python>=4.8, pypylon>=3.0.
+    Das sind Mindestversionen, keine exakt festgeschriebenen Paketversionen.
+
+  README.md
+    Englische Bedienungs- und Diagnosehinweise.
+
+  .gitignore
+    Sagt Git, dass __pycache__/, recordings/ und test_output/ hier ignoriert
+    werden sollen. Diese Ordner werden dadurch nicht gelöscht.
+
+  __pycache__/
+    Automatisch von Python erzeugter Zwischenspeicher für importierten Code.
+
+  test_output/ und gegebenenfalls recordings/
+    Erzeugte Aufnahmedaten; sie sind keine weiteren Programmbausteine.
+
+Die neuen Dateien importieren keine der alten Aufnahmeskripte aus dem anderen
+Projektordner. Sie bilden eine eigenständige Aufnahmestrecke.
+
+
+2. PYTHON- UND KAMERABEGRIFFE ZUM MITLESEN
+========================================
+
+Funktion: Ein benannter Ablauf, z. B. save_json(path, value). Parameter sind
+Eingaben; return liefert ein Ergebnis an den Aufrufer zurück.
+
+Klasse und Objekt: Eine Klasse beschreibt einen Baustein mit Daten und Verhalten.
+FrameTracker ist die Klasse; FrameTracker(30) erzeugt ein konkretes Objekt.
+Jede Kamera erhält einen eigenen Tracker, damit ihre Zähler getrennt bleiben.
+
+Methode, self und __init__: Eine Methode ist eine Funktion einer Klasse. self
+meint das aktuelle Objekt. self.previous speichert beispielsweise dessen altes
+Bild. __init__ initialisiert ein neu erzeugtes Objekt.
+
+Thread: Ein eigener Ausführungsstrang innerhalb desselben Prozesses. Hier gibt
+es normalerweise fünf: Hauptthread, zwei Kamera-Threads und zwei Schreibthreads.
+Sie teilen Speicher. Python-Threads garantieren nicht, dass beliebiger Python-
+Code parallel auf mehreren CPU-Kernen läuft; Warten auf Geräte sowie native
+Bibliotheksarbeit können von dieser Aufteilung dennoch profitieren.
+
+Queue: Eine threadsichere Warteschlange. Die Kamera legt Bildpakete hinein; der
+Schreiber holt sie in derselben Reihenfolge heraus. Die Kapazität ist begrenzt.
+Eine Queue gleicht kurze Verzögerungen aus, aber keine dauerhafte Überlastung.
+
+Event: Ein gemeinsames Signal. stop.set() bedeutet hier: alle Aufnahme-Threads
+sollen aufhören. stop.is_set() fragt das Signal ab. stop.wait(zeit) wartet bis
+zum Signal oder bis die Zeit abgelaufen ist.
+
+Lock: Eine Sperre. Mit 'with self.lock:' darf jeweils nur ein Thread den
+geschützten Abschnitt ausführen. So verändern beide Kameras das gemeinsame
+Aufnahmefenster nicht gleichzeitig in widersprüchlicher Weise.
+
+Frame: Ein Einzelbild. Mono8 ist ein Graustufenbild mit einem Byte pro Pixel:
+0 = schwarz, 255 = weiß. NumPy speichert es als zweidimensionales Array mit
+shape = (Höhe, Breite) und Datentyp uint8.
+
+FPS: Frames per second, also Bilder pro Sekunde. Bei 30 FPS beträgt der ideale
+Abstand ungefähr 0,0333 Sekunden. Soll-FPS, gemessene Empfangs-FPS und die in
+der Videodatei eingestellte Wiedergabe-FPS sind unterschiedliche Größen.
+
+Codec und AVI: Der Codec komprimiert Bilder, beispielsweise MJPG. AVI ist der
+Dateicontainer, in dem die komprimierten Bilder liegen. FourCC ist ein Codec-
+Kennzeichen aus vier Zeichen, z. B. 'MJPG' oder 'XVID'.
+
+SDK und Puffer: pypylon bindet die Basler-Kamerasoftware an Python an. Das SDK
+verwaltet eigene Bildspeicher. Ein ausgeliehenes SDK-Bild darf nach Freigabe
+wiederverwendet werden; deshalb kopiert das Programm die Pixel rechtzeitig.
+
+Zeitstempel: time.perf_counter() liefert eine monotone Zeit in Sekunden;
+perf_counter_ns() liefert die entsprechende Art Zeit in Nanosekunden. Es sind
+keine Kalenderdaten. Differenzen eignen sich zum Messen von Zeitabständen.
+Kamera-Zeitstempel sind dagegen gerätespezifische Ticks; deren Einheit wird
+im Code nicht ermittelt oder in Sekunden umgerechnet.
+
+Dictionary, Liste und Tupel: Ein Dictionary ordnet Namen Werte zu, etwa
+{'received': 12}. Eine Liste sammelt veränderliche Einträge, etwa die Clips.
+Ein Tupel bündelt Werte in fester Reihenfolge, hier das Bildpaket für den Writer.
+
+None: Bedeutet 'kein Wert', z. B. keine verfügbare Block-ID oder keine Aufnahme.
+Das ist etwas anderes als die gültige Zahl 0.
+
+try/except/finally: try führt etwas aus, except behandelt einen Fehler und
+finally räumt beim Verlassen auf, auch wenn zuvor ein Fehler aufgetreten ist.
+Ein harter Prozessabbruch oder Stromausfall kann dieses Aufräumen verhindern.
+
+with: Verwaltet Ressourcen automatisch, z. B. Schließen einer Datei oder
+Freigeben einer Sperre nach Verlassen des eingerückten Abschnitts.
+
+Weitere Schreibweisen: f'...' setzt Werte in Text ein; **dictionary übernimmt
+dessen Einträge in ein neues Dictionary; *self.codec zerlegt 'MJPG' in vier
+Argumente. Eine List-/Dictionary-Comprehension baut eine Sammlung kompakt auf.
+'x if bedingung else y' wählt abhängig von einer Bedingung einen Wert.
+
+
+3. DER WEG EINES BILDES DURCH DAS PROGRAMM
+=========================================
+
+                        gemeinsames RecordingGate
+                       /                         \
+  Top-Kamera -> capture_loop -> Top-Queue  -> Top-VideoSink  -> AVI + CSV
+  Side-Kamera -> capture_loop -> Side-Queue -> Side-VideoSink -> AVI + CSV
+                  |
+                  +-> jeweils neuestes Bild für die optionale Vorschau
+
+Nur der Top-Kamera-Thread wertet die Bewegung aus. Beide Kamera-Threads fragen
+das gemeinsame Gate ab. Sie holen ihre Bilder aber unabhängig voneinander.
+Ein gemeinsames Gate ist deshalb keine Hardware-Synchronisation der Belichtung.
+
+Beispiel eines aufgenommenen Bildes:
+1. Die Kamera liefert ein erfolgreiches Ergebnis.
+2. Das Programm liest Metadaten und kopiert die Pixel.
+3. Der SDK-Puffer wird freigegeben.
+4. Tracker und Zeitstempelprüfung aktualisieren ihre Statistiken.
+5. Bei der oberen Kamera wird gegebenenfalls Bewegung erkannt.
+6. Das Gate liefert eine Segmentnummer, z. B. 3, oder None.
+7. Bei Segment 3 wird das Bildpaket in die zugehörige Queue gelegt.
+8. Der Writer holt es ab und öffnet bei Bedarf top_000003.avi.
+9. Er wandelt das Bild in BGR um, schreibt es und protokolliert eine CSV-Zeile.
+
+Ohne Aufnahmefreigabe entfallen Schritte 7 bis 9. Das ist gewollte Auswahl und
+wird nicht als Queue-Verlust gezählt. Die Kameraüberwachung läuft trotzdem.
+
+
+4. core.py: SÄMTLICHE KLASSEN UND FUNKTIONEN
+==========================================
+
+4.1 save_json(path, value)
+-------------------------
+Zweck: Ein Python-Objekt als gut lesbare JSON-Datei speichern.
+
+path wird in ein Path-Objekt umgewandelt. json.dumps(value, indent=2) macht aus
+den Daten Text mit Einrückungen. Zuerst wird eine temporäre Datei geschrieben,
+z. B. session.tmp. Danach ersetzt temporary.replace(path) die Zieldatei.
+
+Sinn: Eine vorhandene session.json wird erst ersetzt, wenn der neue Text fertig
+geschrieben wurde. Das reduziert das Risiko einer halb überschriebenen JSON-
+Datei. Es ist keine umfassende Garantie gegen Stromausfälle. Die Funktion legt
+den Elternordner nicht an und fängt Schreibfehler nicht selbst ab. Sie hat
+keinen expliziten Rückgabewert und liefert damit None.
+
+4.2 Klasse FrameTracker
+----------------------
+Zweck: Erfolgreich empfangene Bilder beobachten und mögliche Lücken erkennen.
+Die Klasse schreibt keine Videos und entscheidet nicht über die Aufnahme.
+
+__init__(fps, modulus=None)
+  Speichert Soll-FPS und optional den Überlaufwert eines Block-ID-Zählers.
+  previous_id, previous_time und first_time starten mit None. stats enthält
+  received, block_id_gap_frames, block_id_discontinuities, missing_block_ids,
+  sdk_skipped und host_cadence_warnings, jeweils zunächst 0.
+
+observe(block_id, now, skipped=0)
+  Wird für jedes erfolgreich abgeholte Bild aufgerufen, auch außerhalb eines
+  Aufnahmefensters. now ist die monotone Host-Zeit in Sekunden.
+
+  None, 0 und 2^64 - 1 werden als nicht nutzbare IDs behandelt. Dann steigt
+  missing_block_ids; previous_id wird gelöscht. Das nächste gültige Bild
+  beginnt eine neue Vergleichsfolge. Über eine unbekannte ID hinweg kann
+  deshalb keine zuverlässige Lückenzahl berechnet werden.
+
+  Bei gültigen aufeinanderfolgenden IDs wird delta = neue ID - alte ID gebildet.
+  Ist delta negativ und modulus gesetzt, wird modulus einmal addiert.
+  Beispiel mit 65535: auf 65535 folgt 1; -65534 + 65535 = 1, also keine Lücke.
+
+  Bei delta > 0 ist gap = delta - 1. Auf ID 100 folgt 104: Es fehlen drei IDs.
+  Bei delta <= 0 steigt block_id_discontinuities. Das kann ein doppelter Wert,
+  ein Reset oder ein nicht passend behandelter Überlauf sein.
+
+  Liegen zwei Empfangszeiten mehr als 1,5 / fps Sekunden auseinander, steigt
+  host_cadence_warnings. Bei 30 FPS liegt diese Grenze bei 50 Millisekunden.
+  Das ist eine Zeitwarnung, kein sicherer Nachweis eines verlorenen Bildes.
+
+  Danach werden Zeitwerte und received aktualisiert sowie skipped zu
+  sdk_skipped addiert. Rückgabewert ist die Lücke unmittelbar vor diesem Bild.
+
+report()
+  Liefert die Zähler und host_observed_fps als neues Dictionary.
+  Berechnung: (received - 1) / (letzte Empfangszeit - erste Empfangszeit).
+  Warum minus 1? Zwischen 31 Bildern liegen 30 Zeitabstände. Ohne positiven
+  Messzeitraum ist die Bildrate None. Gemessen wird die Empfangsfolge am Rechner,
+  nicht direkt der Belichtungsrhythmus im Sensor.
+
+Grenzen: Verluste vor dem ersten und nach dem letzten gültigen Empfang bleiben
+unsichtbar. Ein Zähler, der ausgelassene Belichtungen gar nicht zählt, zeigt
+diese Ausfälle nicht als ID-Lücken. sdk_skipped und ID-Lücken können dieselben
+Ausfälle beschreiben und dürfen nicht einfach addiert werden.
+
+4.3 Klasse RecordingGate
+-----------------------
+Zweck: Gemeinsam festlegen, ob und in welches Segment gespeichert wird.
+
+__init__(continuous=False, idle_seconds=5, split_seconds=600)
+  continuous bestimmt die Daueraufnahme. idle_seconds ist die Nachlaufzeit,
+  split_seconds die gewünschte maximale Segmentdauer. until ist die Freigabe-
+  grenze; started der Beginn des aktuellen Segments; segment dessen Nummer.
+  Anfangs gilt until=0, started=None und segment=0. Ein Lock schützt Änderungen.
+
+trigger(now, seconds=None)
+  Verlängert until auf mindestens now + seconds. Ohne seconds wird idle_seconds
+  verwendet. max(altes_until, neues_until) verhindert eine Verkürzung.
+  Beispiel: Manuell sind 30 Sekunden freigegeben. Ein Bewegungssignal mit fünf
+  Sekunden Nachlauf nimmt die längere bestehende Freigabe nicht zurück.
+  Kein expliziter Rückgabewert.
+
+select(now)
+  Liefert None, wenn im motion-Modus now >= until ist. Dabei wird started auf
+  None gesetzt, damit die nächste Freigabe ein neues Segment beginnt.
+
+  Andernfalls wird ein neues Segment begonnen, wenn started noch None ist oder
+  split_seconds seit dem letzten Segmentbeginn verstrichen sind. Dazu steigt
+  segment um 1 und started wird auf now gesetzt. Rückgabe ist die Segmentnummer.
+
+  Achtung beim Lesen: select() fragt nicht nur etwas ab, sondern verändert
+  gegebenenfalls den Zustand. Segmentwechsel passieren bei einem Aufruf dieser
+  Methode; es läuft kein eigener Timer im Hintergrund.
+
+Beispiel mit fünf Sekunden Nachlauf: Bewegung bei t=10 gibt bis t=15 frei.
+Weitere Bewegung bei t=13 verlängert bis t=18. Bei t=18 gilt die Freigabe nicht
+mehr. Die kontinuierliche Aufnahme ignoriert until; Segmentsplitting bleibt
+aktiv. Auch eine lange bewegungsgesteuerte Aufnahme wird geteilt.
+
+4.4 Klasse MotionDetector
+------------------------
+Zweck: Zwei aufeinanderfolgende Graubilder vergleichen. Die Klasse erkennt
+Bildänderungen, keine Tiere, Personen oder bestimmten Bewegungsrichtungen.
+
+__init__(start_threshold=200000, continue_threshold=10000, scale=1)
+  previous hält das vorige Vergleichsbild. Es beginnt mit None.
+  start_threshold ist die Schwelle zum Starten, continue_threshold die Schwelle
+  während einer laufenden Freigabe. scale ist ein Verkleinerungsfaktor.
+
+update(frame, active)
+  1. Bei scale=1 wird das Original genutzt; sonst verkleinert cv2.resize das
+     Bild um Faktor scale je Achse. INTER_AREA beschreibt das Resize-Verfahren.
+  2. Beim ersten Bild fehlt ein Vorgänger: Es wird gespeichert, Rückgabe False.
+  3. cv2.absdiff bildet danach den absoluten Helligkeitsunterschied pro Pixel.
+  4. cv2.compare(..., 20, cv2.CMP_GT) markiert Unterschiede strikt größer als 20.
+     Die Ergebniswerte sind 255 für geändert und 0 für unverändert.
+  5. cv2.countNonZero zählt die markierten Pixel.
+  6. score = Anzahl * 255 * scale^2.
+  7. Bei active=True gilt die Fortsetzungsschwelle, sonst die Startschwelle.
+     moved ist True, wenn score mindestens die gewählte Schwelle erreicht.
+  8. previous wird durch das aktuelle Vergleichsbild ersetzt; Rückgabe moved.
+
+Bei scale=1 genügen für die Standard-Startschwelle 785 geänderte Pixel, für
+die Fortsetzungsschwelle 40. Die Multiplikation mit 255 erhält die Skala einer
+aufsummierten Schwarz-Weiß-Maske. scale^2 gleicht die geringere Pixelanzahl
+näherungsweise aus, stellt aber nicht dieselbe Erkennung wieder her: Beim
+Verkleinern können kleine Änderungen verschwinden.
+
+Zwei Schwellen machen den Beginn strenger als die Fortsetzung. Auch ein
+Beleuchtungswechsel oder Kamerawackeln kann Bewegung auslösen. Es gibt keinen
+Hintergrundmodellierer, keine Objektklassifikation und keinen Vorlaufpuffer.
+
+4.5 Klasse VideoSink(threading.Thread)
+-------------------------------------
+Zweck: Ausgewählte Bilder einer Kamera im Hintergrund als Videos speichern.
+Die Klasse erbt von threading.Thread. sink.start() startet einen neuen Thread,
+der run() ausführt. Ein direkter Aufruf von sink.run() läuft dagegen im
+aufrufenden Thread; einige Tests nutzen genau das.
+
+__init__(folder, name, fps, codec, capacity, stop)
+  Initialisiert den Threadnamen writer-top bzw. writer-side, Zielordner,
+  Kameranamen, Wiedergabe-FPS, Codec und das gemeinsame Stoppsignal.
+  queue ist die begrenzte Bildwarteschlange. finished ist ein separates Event:
+  Es sagt dem Writer, dass keine weiteren Bilder vom Kamera-Thread kommen.
+  stats sammelt Schreibstatistiken; clips enthält die entstandenen Videoclips.
+
+submit(packet)
+  Erhöht selected und versucht, das Paket mit put_nowait sofort einzureihen.
+  Bei Erfolg steigen enqueued und gegebenenfalls queue_high_water, der höchste
+  beobachtete Füllstand. Dieser Wert ist eine Beobachtung; der andere Thread
+  kann währenddessen bereits Bilder entnehmen.
+
+  Bei voller Queue steigt queue_dropped, und stop.set() fordert das Stoppen
+  des ganzen Kamerapaars an. Das abgewiesene Bild wird nicht gespeichert.
+  Bewusst wird hier nicht auf freien Platz gewartet, weil das die Abholung
+  weiterer Kamerabilder blockieren würde. Kein expliziter Rückgabewert.
+
+  Ein reguläres packet enthält genau diese acht Werte:
+    (segment, sequence, block, ticks, host, gap, skipped, frame)
+  Also Segmentnummer, lokale Empfangsnummer, Kamera-Block-ID, Kamera-Zeit,
+  Host-Zeit in ns, ID-Lücke davor, SDK-Skipzahl davor und die Bildpixel.
+
+run()
+  Öffnet zunächst top_frames.csv bzw. side_frames.csv und schreibt die
+  Spaltennamen. Dann verarbeitet es Pakete, solange finished nicht gesetzt
+  ODER die Queue noch nicht leer ist. Genau dieses 'oder' sorgt dafür, dass
+  beim normalen Beenden die bereits angenommenen Bilder abgearbeitet werden.
+
+  queue.get(timeout=0.1) wartet maximal 0,1 Sekunden auf ein Paket. Bei leerer
+  Queue beginnt die Schleife erneut und prüft den Endezustand.
+
+  Ändert sich die Segmentnummer, wird der bisherige Writer freigegeben und ein
+  neuer geöffnet, z. B. top_000001.avi. :06d formatiert die Zahl sechsstellig
+  mit führenden Nullen. Aus frame.shape werden Höhe und Breite gelesen.
+
+  cv2.VideoWriter erhält Dateiname, FourCC, fps, Bildgröße (Breite, Höhe) und
+  True für Farbbilder. isOpened() wird geprüft; ohne offenen Writer wird ein
+  RuntimeError ausgelöst. Ein neuer Eintrag in clips hält Dateiname, Schreib-
+  zähler und ersten/letzten Host-Zeitstempel.
+
+  cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) erzeugt drei Farbkanäle aus demselben
+  Grauwert. Das Bild bleibt optisch grau, bekommt aber das erwartete Format.
+  writer.write() übergibt es dem Videoencoder. Ein explizites False wird als
+  Fehler gewertet. Ein gewöhnliches None ist kein nachgewiesener Fehler und
+  wird als abgeschlossener Aufruf gezählt.
+
+  Die Zeitmessung umfasst Umwandlung und write-Aufruf, nicht Queue-Wartezeit,
+  Öffnen/Schließen des Clips oder CSV-Schreiben. Anschließend wird eine CSV-
+  Zeile protokolliert und werden Clip- sowie Gesamtzähler erhöht.
+
+  Exceptions landen als Text in stats['errors']; stop wird gesetzt. finally
+  gibt einen vorhandenen Writer frei. Auch Fehler beim abschließenden release
+  werden protokolliert. Nach einem Writer-Fehler wird die Restqueue nicht
+  garantiert geleert; der Bericht weist ausstehende Schreibvorgänge aus.
+
+  Feinheit: Endet eine Bewegungsfreigabe, bekommt der Writer kein separates
+  'Clip schließen'-Paket. Er schließt den aktuellen Clip beim nächsten Segment
+  oder beim Sessionende. In einer Aufnahmepause kann die Datei also noch offen
+  bleiben, obwohl keine neuen Bilder hineingeschrieben werden.
+
+report()
+  Liefert stats plus clips und enqueued_without_completed_write.
+  Letzterer Wert ist enqueued - write_calls_completed: angenommene Bilder ohne
+  vollständig protokollierten Schreibabschluss. Ein bereits in write()
+  übergebenes Bild kann bei einem anschließenden CSV-Fehler trotzdem unter
+  dieser Differenz auftauchen; der Wert ist keine direkte Dateiinhaltsmessung.
+
+4.6 verify_session(folder)
+--------------------------
+Zweck: Prüfen, ob die gemeldeten Videos tatsächlich die erwartete Zahl lesbarer
+Bilder enthalten. Diese Prüfung erfolgt nach der Aufnahme.
+
+Liest session.json und durchläuft für jede Kamera die Liste writer['clips'].
+Jeden Clip öffnet cv2.VideoCapture. capture.read() decodiert ein Bild nach dem
+anderen; jeder erfolgreiche Aufruf erhöht count. Bei False endet die Schleife.
+capture.release() wird durch finally sichergestellt.
+
+Erwartet wird clip['write_calls_completed']. matched ist nur True, wenn die
+Datei geöffnet werden konnte und die decodierte Anzahl gleich der erwarteten
+Anzahl ist. Jeder Prüfeintrag enthält file, expected, decoded und matched.
+
+all_video_counts_match wird nur dann True, wenn mindestens ein Clip geprüft
+wurde und alle Einträge passen. Ohne Clips lautet das Ergebnis False.
+Das Resultat wird nach verification.json geschrieben und als Dictionary
+zurückgegeben. Es enthält zusätzlich einen Hinweis auf die Grenzen der Prüfung.
+
+Diese Funktion durchsucht nicht beliebige AVI-Dateien im Ordner, sondern nur
+die in session.json verzeichneten Clips. Sie prüft weder den Bildinhalt auf
+Duplikate noch die CSV-Zeilen oder mögliche Verluste vor dem Encoder. Fehler
+beim Lesen der JSON-Datei werden nicht hier abgefangen.
+
+
+5. run_single_module.py: START, KAMERAANBINDUNG UND STEUERUNG
+==========================================================
+
+5.1 optional_value(result, method)
+---------------------------------
+Zweck: Optionale Kamera-Metadaten auslesen, ohne bei einer fehlenden Methode
+sofort die Aufnahme zu beenden.
+
+getattr(result, method) sucht eine Methode über ihren Namen als Text, z. B.
+'GetBlockID'. () ruft sie auf; int(...) wandelt das Ergebnis in eine ganze Zahl
+um. Bei AttributeError oder RuntimeError wird None zurückgegeben. Andere
+Fehlertypen, etwa eine nicht mögliche Zahlenumwandlung, werden nicht abgefangen.
+
+5.2 open_cameras(args)
+----------------------
+Zweck: Die beiden ausgewählten realen Kameras finden, öffnen und konfigurieren.
+
+pypylon wird erst innerhalb dieser Funktion importiert. Deshalb braucht die
+Simulation dieses Paket nicht zu importieren. pylon.TlFactory.GetInstance()
+liefert die Gerätefabrik. EnumerateDevices() findet verfügbare Geräte; ein
+Dictionary ordnet deren Seriennummern den Geräteinformationen zu.
+
+Für top_serial und danach side_serial geschieht Folgendes:
+  - Prüfen, ob die Seriennummer vorhanden ist; sonst RuntimeError mit den
+    verfügbaren Seriennummern.
+  - InstantCamera erzeugen, in cameras aufnehmen und Open() aufrufen.
+  - Width, Height und PixelFormat='Mono8' setzen.
+  - TriggerMode='Off': keine externe Triggersteuerung durch diese Einstellung.
+  - ExposureAuto='Off' und ExposureTime auf exposure_us setzen.
+  - AcquisitionFrameRateEnable aktivieren und AcquisitionFrameRate setzen.
+  - MaxNumBuffer auf camera_buffers setzen.
+
+Rückgabe: das Paar (cameras, pylon). cameras enthält top an Position 0 und side
+an Position 1. pylon wird für Konstanten in den Kamera-Threads weitergegeben.
+
+Nicht unterstützte Einstellungen führen zu einem Fehler, es gibt keinen
+automatischen Ersatzwert. except BaseException versucht bereits geöffnete
+Kameras zu schließen und wirft den ursprünglichen Fehler mit raise weiter.
+BaseException schließt hier auch Unterbrechungen wie KeyboardInterrupt ein.
+
+5.3 capture_loop(index, camera, pylon, args, sink, gate, stop, report, preview)
+---------------------------------------------------------------------------
+Zweck: Für genau eine Kamera Bilder abholen, überwachen und bei Freigabe an
+deren Writer weitergeben. Diese Funktion ist das Ziel eines Kamera-Threads.
+
+Parameter:
+  index: 0 für top, 1 für side.
+  camera: Kameraverbindung; None bedeutet Simulation.
+  pylon: SDK-Modul mit benötigten Konstanten; in der Simulation None.
+  args: eingelesene Programmoptionen.
+  sink: zugehöriger VideoSink.
+  gate: gemeinsames Aufnahmefenster für beide Kameras.
+  stop: gemeinsames Stoppsignal.
+  report: Dictionary, das beim Beenden mit Ergebnissen gefüllt wird.
+  preview: gemeinsame Zweierliste für jeweils das neueste Bild.
+
+Vorbereitung:
+  Ein FrameTracker und ein MotionDetector werden angelegt. Bei side existiert
+  zwar auch ein Detector-Objekt, aber update() wird dort nicht aufgerufen.
+  Fehlerzähler, lokale sequence und Kamera-Zeitstempel beginnen leer bzw. bei 0.
+
+Echte Kamera:
+  StartGrabbing(GrabStrategy_OneByOne) startet die Bildabholung in SDK-Reihenfolge.
+  Diese Strategie ersetzt nicht absichtlich ältere Ergebnisse durch das neueste.
+  Sie ist dennoch keine Garantie für verlustfreien Betrieb bei Überlastung.
+
+  RetrieveResult(1000, TimeoutHandling_Return) wartet auf ein Ergebnis, maximal
+  1000 Millisekunden. None zählt als Timeout und löst einen Fehler aus. Ein
+  Ergebnis mit GrabSucceeded()==False zählt als Grab-Fehler und beendet die
+  Schleife ebenfalls über eine Exception.
+
+  Block-ID, Zeitstempel und SDK-Skipzahl werden optional ausgelesen. Fehlt die
+  Skipzahl, wird sie hier als 0 behandelt. result.Array.copy() legt eine eigene
+  Kopie der Pixel an. Im finally-Block folgt result.Release(). Die Reihenfolge
+  ist entscheidend: Ohne Kopie könnte das SDK denselben Speicher überschreiben,
+  während das Bild noch in der Writer-Queue liegt.
+
+Simulation:
+  Ohne camera wartet stop.wait() bis zum nächsten geplanten Bildtermin. Dieser
+  Termin wird jeweils um 1/fps erhöht. Ist der Ablauf verspätet, wird nicht
+  zusätzlich gewartet; die Simulation kann versuchen, den Plan einzuholen.
+
+  np.full erzeugt ein einfarbiges Bild mit Grauwert sequence % 256. Es wird
+  langsam heller und springt nach 255 auf 0. Block-IDs steigen fortlaufend;
+  als simulierte Kamera-Ticks dienen perf_counter_ns()-Werte.
+
+  Die normalen Helligkeitsschritte von 1 überschreiten die Motion-Pixelschwelle
+  von 20 nicht. Der Sprung von 255 auf 0 kann sie überschreiten. Für kurze
+  Simulationen ist deshalb --mode continuous sinnvoll, wenn Videos entstehen
+  sollen.
+
+Gemeinsamer Ablauf nach dem Bildempfang:
+  - Host-Zeit in ns messen; für Zeitvergleiche durch 1e9 teilen.
+  - Erste und letzte Kamera-Ticks speichern. Nicht steigende Werte zählen als
+    camera_timestamp_discontinuities. Ein Zählerüberlauf wird hier nicht
+    gesondert korrigiert.
+  - tracker.observe() aufrufen und die unmittelbar vorhergehende Lücke merken.
+  - sequence erhöhen. Das erste regulär weitergegebene Bild hat sequence=1.
+  - Nur bei index=0 und mode='motion': Gate-Zustand abfragen, Bildänderung
+    prüfen und bei erkannter Bewegung gate.trigger(now) aufrufen.
+  - Gate erneut abfragen und bei gültiger Segmentnummer das Bildpaket submitten.
+  - preview[index] auf das neueste Bild setzen, auch ohne aktive GUI-Vorschau.
+
+Die Vorschau hat keine Bildwarteschlange. Wenn die Anzeige langsamer ist,
+überspringt sie bewusst Zwischenbilder. Das zählt nicht als Aufnahmeverlust.
+
+Fehler und Abschluss:
+  Eine Exception wird lokal gespeichert und setzt stop für beide Kameras.
+  Im finally-Block werden laufende Kameraabholung und Kamera geschlossen.
+  Danach wird report mit Trackerwerten, Grab-Fehlern, Timeouts, Fehlertexten
+  und Zeitstempelwerten gefüllt. sink.finished.set() meldet dem Writer das
+  Ende dieses Produzenten. Die Funktion liefert kein Ergebnis per return;
+  sie kommuniziert über Queue, Events und die übergebenen Datenobjekte.
+
+5.4 parse_args()
+----------------
+Zweck: Optionen aus der Kommandozeile lesen und offensichtliche Eingabefehler
+verhindern. argparse erzeugt außerdem automatisch die Ausgabe von --help.
+
+add_argument legt jeweils Optionsnamen, Datentyp, Standardwert und teilweise
+zulässige Auswahlwerte fest. parse_args liefert ein Namespace-Objekt; auf dessen
+Werte greift man beispielsweise mit args.fps zu. Bindestriche aus Optionsnamen
+werden in Attributnamen durch Unterstriche ersetzt.
+
+Validiert wird:
+  - FPS, Bildabmessungen, Belichtung, beide Puffergrößen, Nachlaufzeit,
+    Segmentdauer, motion_scale und preview_fps: positiv und endlich.
+  - duration: endlich und nicht negativ; 0 bedeutet unbegrenzt.
+  - Bewegungsschwellen: endlich und nicht negativ.
+  - Breite und Höhe: gerade, damit Codecs nicht wegen ungerader Maße beschneiden.
+  - motion_scale: nicht größer als die kleinere Bildabmessung.
+  - Codec: genau vier Zeichen.
+  - Ohne Simulation: zwei vorhandene Angaben für unterschiedliche Seriennummern.
+
+math.isfinite schließt unendliche Werte und NaN aus. parser.error zeigt den
+Fehler an und beendet den Start. Ob die Kamera eine Konfiguration wirklich
+unterstützt oder ein Codec verfügbar ist, wird erst später erkennbar.
+
+5.5 main()
+----------
+Zweck: Die gesamte Session organisieren. main() ist der zentrale Einstieg.
+
+A. Vorbereitung
+  Optionen lesen. cv2.setNumThreads(1) begrenzt interne OpenCV-Verarbeitung,
+  damit mehrere Prozesse nicht unnötig viele interne Worker erzeugen. Dies
+  beseitigt nicht die expliziten Python-Kamera- und Writer-Threads.
+
+  Das Label wird auf Buchstaben/Ziffern, '-' und '_' bereinigt und auf 80 Zeichen
+  gekürzt. Andere Zeichen werden '_'. Ein Ordnername entsteht aus lokalem Datum,
+  Uhrzeit mit Mikrosekunden und Label. mkdir(parents=True, exist_ok=False) legt
+  ihn an und meldet eine Kollision als Fehler.
+
+  Die Optionen werden als configuration gesichert; Path-Werte werden zu Text,
+  damit JSON sie speichern kann. session.json beginnt mit status='starting'.
+  Die Konsole zeigt Zielordner und theoretisches Bildbudget beider Queues.
+
+  stop, Gate, Vorschauplätze und Listen für Kameras/Threads werden angelegt.
+  origin markiert die Zeit vor dem Kameraöffnen.
+
+B. Kameras und Threads starten
+  Echte Kameras öffnen oder zwei None-Platzhalter für die Simulation verwenden.
+  Für top und side jeweils einen Kamerabericht anlegen, VideoSink starten und
+  einen capture_loop-Thread starten. Die Threads erhalten dasselbe Gate und
+  stop, aber jeweils ihren eigenen Writer und Aufnahmebericht.
+  Anschließend status='recording' in session.json speichern.
+
+C. Steuerung im Hauptthread
+  Ohne Vorschau wartet die Hauptschleife jeweils bis zu 0,1 Sekunden, sonst
+  1/preview_fps Sekunden. Ein Stoppsignal beendet das Warten vorzeitig.
+  Eine gesetzte duration beendet den Lauf, sobald now-origin groß genug ist.
+  Die Dauer beinhaltet daher auch die Startphase seit origin und ist keine
+  exakt garantierte reine Kameraaufnahmezeit.
+
+  Mit --preview werden die neuesten Bilder auf 720x405 skaliert angezeigt.
+  Bei anderen Seitenverhältnissen kann diese feste Vorschau verzerren; die
+  gespeicherten Bilder behalten die Aufnahmeabmessungen. cv2.waitKey(1) fragt
+  eine Taste im OpenCV-Fenster ab: q beendet, r gibt mindestens bis now+30 frei.
+  Im continuous-Modus ist ohnehin ständig freigegeben. Ohne Vorschau gibt es
+  diese Tastenabfrage nicht; dort kann Ctrl+C genutzt werden.
+
+  Etwa alle fünf Sekunden werden Queue-Füllung, abgeschlossene Schreibaufrufe
+  und Queue-Verluste ausgegeben. Die Vorschau-FPS ändern nicht die Kamera-FPS.
+
+D. Aufräumen
+  KeyboardInterrupt wird als normaler Abbruch behandelt; andere Exceptions im
+  überwachten Abschnitt kommen in run_errors. finally setzt stop und wartet
+  mit worker.join() auf das Ende der Kamera-Threads. Danach wird finished für
+  jeden Writer gesetzt und mit sink.join() dessen Abschluss abgewartet.
+
+  Diese Reihenfolge verhindert im normalen Ablauf, dass ein Writer fertig ist,
+  während seine Kamera noch neue Pakete liefert. Angenommene Pakete können
+  beim normalen Stop vollständig abgearbeitet werden. Ein dauerhaft blockierter
+  nativer Schreibaufruf kann das Warten allerdings unbegrenzt verlängern.
+
+  Noch offene Kameras werden geschlossen, Vorschaufenster gegebenenfalls
+  zerstört und Writer-Berichte in session übernommen. status wird 'stopped'.
+  Das bedeutet 'beendet', nicht automatisch 'fehlerfrei'. elapsed_seconds
+  enthält auch das Aufräumen bis zur Berechnung, aber nicht die spätere Prüfung.
+
+E. Gesamtdiagnose und Rückgabe
+  has_loss_or_errors wird True bei Laufzeitfehlern oder bei Kamera-/Writer-
+  Fehlern, ID-Lücken, ID-Unstetigkeiten, unstetigen Kamera-Ticks, SDK-Skips,
+  Queue-Verlusten oder ausstehenden Schreibabschlüssen.
+
+  Fehlende Block-IDs und reine host_cadence_warnings setzen dieses Flag allein
+  nicht. False heißt deshalb nicht, dass die Vollständigkeit bewiesen ist.
+  Der abschließende Bericht wird in session.json gespeichert.
+
+  Mit --verify wird danach geprüft, sofern run_errors leer ist und mindestens
+  ein Clip existiert. Lokale Fehler in Kamera-/Writer-Berichten verhindern den
+  Prüfversuch nicht automatisch. Bei abweichenden Bildzahlen wird das Verlust-
+  flag nachträglich auf True gesetzt und session.json erneut gespeichert.
+
+  Zum Schluss wird der Berichtspfad ausgegeben. Rückgabe ist 1 bei gesetztem
+  Verlust-/Fehlerflag, sonst 0. Diese Zahlen dienen aufrufenden Programmen als
+  Exitcode. Die separate verify_videos.py kann nur ihre eigene Prüfung melden.
+
+Fehlergrenze: Nicht jeder denkbare Fehler wird in session.json aufgenommen.
+Einige Vorbereitungsschritte liegen vor dem großen try, die optionale Prüfung
+liegt danach. Dortige Fehler können direkt als Python-Fehlermeldung enden.
+
+5.6 Der Block if __name__ == '__main__'
+-------------------------------------
+Beim direkten Starten der Datei lautet __name__ '__main__'. Dann wird main()
+ausgeführt und dessen Rückgabe durch SystemExit zum Prozess-Exitcode.
+Beim Importieren, z. B. aus test_recording.py, wird dieser Block übersprungen.
+Dadurch kann der Test capture_loop importieren, ohne eine Session zu starten.
+
+
+6. verify_videos.py: NACHTRÄGLICHE VIDEOPRÜFUNG
+=============================================
+
+Diese Datei definiert keine eigenen Klassen oder Funktionen. Ihr Hauptblock
+wird nur beim direkten Start ausgeführt:
+1. ArgumentParser erstellen.
+2. Den erforderlichen Positionsparameter session_folder einlesen.
+3. verify_session(args.session_folder) aus core.py aufrufen.
+4. Das Ergebnis als eingerückten JSON-Text in der Konsole ausgeben.
+5. Exitcode 0 bei all_video_counts_match=True, sonst 1 liefern.
+
+Sinn der separaten Datei: Man kann erst alle Versuchsaufnahmen beenden und dann
+Videos decodieren. Gleichzeitiges Decodieren würde CPU und Datenträger zusätzlich
+belasten. Die separate Prüfung schreibt verification.json; sie aktualisiert
+das Verlustflag in session.json nicht selbst.
+
+
+7. test_recording.py: SÄMTLICHE TESTS UND HILFSKLASSEN
+===================================================
+
+RecordingTests(unittest.TestCase)
+--------------------------------
+Die Klasse bündelt acht automatische Tests. unittest entdeckt Methoden, deren
+Name mit test_ beginnt. assertEqual prüft Gleichheit, assertTrue/assertFalse
+prüfen Wahrheitswerte, assertIsNone prüft None. Eine fehlgeschlagene Assertion
+meldet einen Testfehler. Die Klasse braucht keinen eigenen __init__.
+
+test_block_gaps_wrap_missing_and_cadence()
+  Führt eine künstliche ID-Folge über den Überlauf 65535 -> 1, dann über eine
+  Lücke 1 -> 4 und eine fehlende ID. Erwartet zwei fehlende Bilder, eine fehlende
+  ID und eine Zeitwarnung. Ein zweiter Tracker ohne modulus erhält 100 -> 1:
+  Das muss eine Unstetigkeit und keine berechnete positive Lücke sein.
+
+test_motion_gate_idle_manual_and_split()
+  Prüft das zunächst geschlossene Gate, Freigabe, Segmentwechsel nach zwei
+  Sekunden, Auslaufen nach fünf Sekunden und eine manuelle 30-Sekunden-Freigabe.
+  Ein späterer kürzerer Bewegungstrigger darf diese Freigabe nicht verkürzen.
+
+test_motion_threshold()
+  Übergibt erst zwei schwarze Bilder, dann ein um 30 Graustufen helleres Bild.
+  Die ersten beiden Ergebnisse müssen False, das dritte muss True sein.
+  Das ist ein Grundtest der Bilddifferenz, keine Prüfung aller Schwellenfälle.
+
+test_overflow_stops_and_accounts()
+  Erstellt eine Queue mit nur einem Platz und startet keinen Writer. Zwei
+  submit-Aufrufe müssen das Stoppsignal, zwei ausgewählte Pakete und einen
+  Queue-Verlust ergeben. Ein angenommenes Paket bleibt ungeschrieben.
+  Die Pakete sind absichtlich verkürzt, weil sie hier niemand entpackt.
+
+test_real_codec_split_decode_and_missing_file()
+  Nutzt einen temporären Ordner und echte OpenCV-MJPG-Ausgabe. Zwölf künstliche
+  Bilder werden in zwei Segmente mit je sechs Bildern geteilt. finished wird
+  schon vor start gesetzt; die Queue muss trotzdem vollständig geleert werden.
+  join(10) wartet höchstens zehn Sekunden, danach wird auf Threadende geprüft.
+
+  Anschließend werden zwölf Schreibabschlüsse und zwei decodierbare Clips mit
+  jeweils sechs Bildern geprüft. Beim ersten Clip kontrolliert der Test auch
+  die erwarteten mittleren Helligkeiten in Reihenfolge. delta=2 erlaubt kleine
+  Kompressionsabweichungen. Nach Löschen des ersten Videos muss die Prüfung
+  fehlschlagen. TemporaryDirectory räumt den Testordner automatisch auf.
+
+test_writer_open_failure()
+  unittest.mock.patch ersetzt core.cv2.VideoWriter vorübergehend durch ein
+  kontrollierbares Testobjekt. isOpened() liefert False. Der Test erwartet
+  Stoppsignal, protokollierten Fehler und ein ungeschriebenes angenommenes Bild.
+  Das ist eine gezielte Fehlersimulation, kein echter Codecfehler.
+
+test_copy_precedes_release_and_camera_cleanup()
+  Simuliert ein SDK, das seinen Bildspeicher sofort nach Release verändert.
+  Das ursprüngliche Bild hat überall Grauwert 77. Nach capture_loop muss das
+  Queue-Bild weiterhin 77 enthalten, die Kamera geschlossen und der Writer
+  als finished markiert sein. Es dürfen keine Aufnahmefehler gemeldet werden.
+
+  Dazu definiert diese Testmethode zwei lokale Hilfsklassen:
+
+  Result
+    Array: verweist auf das künstliche Bild.
+    GrabSucceeded(): liefert True.
+    GetBlockID(): liefert 1.
+    GetTimeStamp(): liefert 100.
+    GetNumberOfSkippedImages(): liefert 0.
+    Release(): überschreibt den ursprünglichen Bildspeicher mit 0 und setzt
+               stop, damit die Aufnahmeschleife nach diesem Bild endet.
+
+  Camera
+    closed: startet als False und zeigt, ob Close() aufgerufen wurde.
+    StartGrabbing(strategy): tut nichts; akzeptiert den erwarteten Aufruf.
+    RetrieveResult(timeout, handling): liefert ein neues Result-Objekt.
+    IsGrabbing(): liefert True, damit der Aufräumpfad ausgeführt wird.
+    StopGrabbing(): tut nichts, bildet die SDK-Schnittstelle nach.
+    Close(): setzt self.closed auf True.
+
+  pass bedeutet bei diesen Methoden einen absichtlich leeren Funktionskörper.
+  SimpleNamespace stellt die benötigten args-Attribute und pylon-Konstanten
+  bereit. Diese Hilfsobjekte emulieren nur den für den Test nötigen Ausschnitt.
+
+test_disk_failure_accounts_for_unwritten_frames()
+  Legt drei Bilder in die Queue. Ein gemockter Writer öffnet erfolgreich,
+  schreibt beim ersten Mal ohne Fehlermeldung und wirft beim zweiten Aufruf
+  OSError('disk full'). Erwartet werden Stoppsignal, ein abgeschlossener
+  Schreibvorgang und zwei angenommene Bilder ohne Abschluss.
+
+Hauptblock von test_recording.py
+  unittest.main() startet beim direkten Dateiaufruf die Tests. Alternativ
+  findet unittest discover die Testdatei vom Projektstamm aus.
+
+Was diese Tests nicht nachweisen: reale Kamerakompatibilität, erreichbare
+Bildrate im Langzeitbetrieb, echte USB-/GigE-Bandbreite, Hardware-Synchronität
+oder robuste Bewegungserkennung in allen Versuchssituationen.
+
+
+8. EINSTELLUNGEN DER KOMMANDOZEILE
+=================================
+
+Alle folgenden Optionen gehören zu run_single_module.py:
+
+  --top-serial / --side-serial   Standard: keine
+    Seriennummern der zwei Kameras; ohne --simulate zwingend und verschieden.
+  --label                      Standard: experiment
+    Name als Zusatz im Sessionordner.
+  --output                     Standard: recordings neben dem Startskript
+    Übergeordneter Ausgabeordner; jede Session erhält einen neuen Unterordner.
+  --fps                        Standard: 30
+    Soll-Bildrate der Kamera und Wiedergaberate des Videos.
+  --width / --height            Standard: 1920 / 1080
+    Aufnahmeabmessungen in Pixeln.
+  --exposure-us                Standard: 4000
+    Belichtungszeit in Mikrosekunden; 4000 us entsprechen 4 ms.
+  --codec                      Standard: MJPG
+    Vierstelliges Codec-Kennzeichen, beispielsweise alternativ XVID.
+  --queue-frames               Standard: 64
+    Maximale Anzahl wartender Rohbilder je Kamera im Python-Writerpuffer.
+  --camera-buffers             Standard: 32
+    SDK-Puffer je Kamera; getrennt von der Python-Queue.
+  --mode                       Standard: motion
+    motion oder continuous.
+  --idle-seconds               Standard: 5
+    Nachlaufzeit ab erkannter Bewegung.
+  --split-seconds              Standard: 600
+    Neue Segmentnummer nach dieser Zeit seit Segmentbeginn; 600 s = 10 min.
+  --duration                   Standard: 0
+    Laufzeitgrenze in Sekunden; 0 läuft bis zum Stoppen oder Fehler.
+  --start-threshold            Standard: 200000
+    Bewegungspunktzahl zum Start einer Freigabe.
+  --continue-threshold         Standard: 10000
+    Bewegungspunktzahl zum Verlängern einer bestehenden Freigabe.
+  --motion-scale               Standard: 1
+    Verkleinerungsfaktor der Bilder ausschließlich für die Bewegungserkennung.
+  --block-id-modulus           Standard: nicht gesetzt
+    Einziger erlaubter Wert ist 65535. Nur bei bestätigtem Zähler 1..65535
+    passend; nicht pauschal für jede Kamera setzen.
+  --preview                    Standard: aus
+    Aktiviert die Vorschaufenster und Tastatursteuerung darin.
+  --preview-fps                Standard: 5
+    Warteintervall der Vorschau-Steuerung; tatsächliche Anzeige kann langsamer
+    sein, da Verarbeitung zusätzlich Zeit benötigt.
+  --verify                     Standard: aus
+    Nach dem Beenden vorhandene Clips automatisch vollständig decodieren.
+  --simulate                   Standard: aus
+    Künstliche Bilder statt realer Kameras verwenden.
+  --help / -h
+    Automatisch erzeugte Hilfe anzeigen und beenden.
+
+Optionen wie --preview sind Schalter ohne nachfolgenden Wert. Andere brauchen
+einen Wert, beispielsweise '--fps 30'. Dezimalzahlen werden mit Punkt angegeben.
+
+
+9. AUSGABEDATEIEN UND DIAGNOSEWERTE VERSTEHEN
+===========================================
+
+Ein Sessionordner enthält normalerweise:
+  session.json           Konfiguration und zusammengefasste Ergebnisse
+  top_frames.csv         Protokoll der Top-Schreibabschlüsse
+  side_frames.csv        Protokoll der Side-Schreibabschlüsse
+  top_000001.avi usw.     Top-Videos pro Segment
+  side_000001.avi usw.    Side-Videos pro Segment
+  verification.json      Nur nach einer ausgeführten Videoprüfung
+
+Die CSV-Datei kann schon existieren, obwohl kein Clip aufgenommen wurde.
+Ein Video entsteht erst, wenn der Writer das erste Paket dafür verarbeitet.
+
+session.json: oberste Ebene
+  status: starting, recording oder stopped.
+  configuration: beim Start verwendete Optionen.
+  cameras: Liste der Kameraberichte mit name, serial, acquisition und writer.
+  errors: Fehler des zentralen Ablaufs.
+  elapsed_seconds: Zeit seit origin bis zur abschließenden Zusammenfassung.
+  has_loss_or_errors: zusammengefasste Auffälligkeiten gemäß main().
+
+Die Datei wird nicht für jedes Bild aktualisiert. Während einer laufenden oder
+hart abgebrochenen Session fehlen deshalb gegebenenfalls finale Statistiken.
+
+acquisition: Kameraabholung
+  received: erfolgreich bearbeitete empfangene Bilder, inklusive Aufnahmepausen.
+  block_id_gap_frames: anhand gültiger IDs erkannte fehlende Nummern.
+  block_id_discontinuities: nicht als normale Folge erklärbare ID-Übergänge.
+  missing_block_ids: Bilder ohne brauchbare ID.
+  sdk_skipped: Summe der vom SDK gemeldeten übersprungenen Bilder.
+  host_cadence_warnings: ungewöhnlich große Host-Empfangsabstände.
+  host_observed_fps: mittlere Host-Empfangsrate über die erfolgreiche Bildfolge.
+  grab_failures: Ergebnisse, deren GrabSucceeded False war.
+  timeouts: Fälle ohne Ergebnis innerhalb der 1000-ms-Frist.
+  errors: Fehlertexte des Kamera-Threads einschließlich Aufräumfehlern.
+  first_camera_timestamp_ticks / last_camera_timestamp_ticks: erste und letzte
+    verfügbare Kamera-Zeitwerte.
+  camera_timestamp_discontinuities: nicht streng steigende Kamera-Zeitwerte.
+
+writer: Aufnahme und Speicherung
+  selected: zur Aufnahme ausgewählte und submit übergebene Bilder.
+  enqueued: erfolgreich in die Queue eingereihte Bilder.
+  queue_dropped: wegen voller Queue abgewiesene Bilder.
+  queue_high_water: höchster beobachteter Queue-Füllstand.
+  write_calls_completed: Schreibaufrufe mit anschließend erfolgreicher
+    CSV-Protokollierung und Zähleraktualisierung.
+  max_write_ms: größter gemessener Zeitbedarf für BGR-Konvertierung plus write.
+  errors: Fehlertexte des Writers.
+  enqueued_without_completed_write: enqueued minus write_calls_completed.
+  clips: pro Clip file, write_calls_completed, first_host_ns und last_host_ns.
+
+Wichtige Beziehungen:
+  selected = enqueued + queue_dropped
+  enqueued_without_completed_write = enqueued - write_calls_completed
+
+received muss nicht selected entsprechen. Beispiel: 300 Bilder empfangen,
+100 im Aufnahmefenster ausgewählt, 100 angenommen und 100 geschrieben. Die
+übrigen 200 sind im motion-Modus gewollt nicht gespeichert worden.
+
+CSV-Spalten im Einzelnen
+  segment: gemeinsame Segmentnummer zum Zeitpunkt der Auswahl.
+  video_frame_index: Position im jeweiligen Video, beginnend mit 0.
+  capture_sequence: lokale Empfangsnummer dieser Kamera, regulär beginnend mit 1.
+  block_id: SDK-/Kamera-ID; bei None bleibt das CSV-Feld leer.
+  camera_timestamp_ticks: unbearbeiteter Kamera-Zeitwert.
+  host_monotonic_ns: Host-Zeit beim Empfang nach Pixelkopie/Freigabe.
+  block_gap_before: vom Tracker erkannte ID-Lücke vor diesem Bild.
+  sdk_skipped_before: SDK-Skipzahl des zugehörigen Ergebnisses.
+  write_ms: gemessene Konvertierungs-/Schreibzeit, auf drei Nachkommastellen
+    gerundet.
+
+Eine Lücke in capture_sequence zwischen zwei Clips kann schlicht durch eine
+Aufnahmepause entstehen. Sie ist nicht dasselbe wie eine Block-ID-Lücke zwischen
+zwei aufeinanderfolgenden Kameraempfängen. Nicht ausgewählte Bilder stehen
+überhaupt nicht in der CSV; acquisition zählt sie trotzdem.
+
+verification.json
+  clips: Liste der Dateiprüfungen mit erwarteter und decodierter Bildzahl.
+  all_video_counts_match: mindestens ein Clip vorhanden und alle Zahlen passend.
+  note: Hinweis, dass passende Zahlen keine vollständige Bildintegritätsprüfung
+    oder Garantie gegen kameraseitige Verluste darstellen.
+
+Beispiel: 300 empfangen, ein ID-Sprung, 300 geschrieben und 300 decodiert.
+Die Videoprüfung kann erfolgreich sein, obwohl die Kameraabholung eine Lücke
+erkannt hat. Darum müssen session.json und verification.json zusammen gelesen
+werden. Es sind Prüfungen unterschiedlicher Abschnitte der Datenstrecke.
+
+
+10. BEISPIELE, GRENZEN UND ORIENTIERUNG FÜR ÄNDERUNGEN
+====================================================
+
+Die folgenden Befehle werden aus dem Projekt-Hauptordner ausgeführt. Sie sind
+Bedienbeispiele; für diese Dokumentation wurden sie nicht als Aufnahme gestartet.
+
+Hilfe:
+  python optimized_recording/run_single_module.py --help
+
+Installation der Python-Abhängigkeiten in der gewünschten Python-Umgebung:
+  python -m pip install -r optimized_recording/requirements.txt
+
+Für echte Kameras ist zusätzlich eine passende Basler-pylon-Laufzeitumgebung
+nötig. Die Simulation verwendet nur NumPy und OpenCV aus diesen Zusatzpaketen.
+
+Kurze Simulation mit Videoprüfung:
+  python optimized_recording/run_single_module.py --simulate --mode continuous --duration 3 --width 320 --height 240 --split-seconds 1 --verify
+
+Dabei entstehen ungefähr drei Sekunden künstliche Bilder, auf mehrere Segmente
+verteilt. Die exakte Anzahl ist nicht fest zugesagt, weil Threads und Start-/
+Stopzeitpunkte das Ergebnis beeinflussen.
+
+Reale Aufnahme mit Vorschau, Platzhalter vorher ersetzen:
+  python optimized_recording/run_single_module.py --top-serial TOP_SERIENNUMMER --side-serial SIDE_SERIENNUMMER --label versuch1 --preview
+
+Die README weist auf widersprüchliche Top1-Seriennummern in alten Projektdateien
+hin. Deshalb Seriennummern an der tatsächlichen Hardware prüfen und nicht blind
+aus alten Beispielen übernehmen. Alte und neue Recorder dürfen nicht gleichzeitig
+dieselben Kameras benutzen.
+
+Vorhandene Session später prüfen, Pfad ersetzen:
+  python optimized_recording/verify_videos.py "optimized_recording/recordings/SESSION_ORDNER"
+
+Vorhandene automatisierte Tests ausführen:
+  python -m unittest discover -s optimized_recording -p "test_*.py" -v
+
+Speicherbedarf und Leistung
+--------------------------
+Ein Mono8-Bild mit 1920x1080 benötigt 2.073.600 Byte reine Pixel. Zwei Queues
+mit je 64 Bildern ergeben 265.420.800 Byte bzw. rund 253,1 MiB. Dazu kommen
+SDK-Puffer, gerade verarbeitete Bilder, Vorschauverweise, BGR-Konvertierungen,
+Encoder und sonstige Python-/Bibliotheksdaten. Das gedruckte Queue-Budget ist
+also nicht der gesamte RAM-Verbrauch.
+
+Ein einzelner Drei-Kanal-BGR-Bildpuffer benötigt dreimal so viele Pixelbytes
+wie Mono8. Die Umwandlung geschieht erst im Writer, damit die Queue Grauwerte
+behalten kann. Größere Queues puffern kurze Lastspitzen, beheben aber keine
+dauerhaft zu langsame Kompression oder Festplatte.
+
+Zeit und Synchronisierung
+-------------------------
+Beide Kameras teilen die Segmententscheidung, werden aber nicht durch diesen
+Code synchron belichtet. An Segmentgrenzen können deshalb Unterschiede in
+Bildanzahl und zeitlicher Lage entstehen. Gleiche video_frame_index-Werte
+beweisen keine zeitgleichen Aufnahmen. Kamera-Ticks werden nicht zwischen
+Geräten synchronisiert; Host-Zeiten kennzeichnen die Abholung, nicht Belichtung.
+
+AVI wird mit konstanter FPS geschrieben. Wenn Bilder fehlen, fügt der Code keine
+Ersatzbilder ein. Beispiel: 270 gespeicherte Bilder bei 30 Video-FPS ergeben
+neun Sekunden Wiedergabe, auch wenn die zugehörige reale Aufnahme zehn Sekunden
+gedauert hat. Für zeitliche Analysen sind deshalb die CSV-Zeitwerte relevant.
+
+Bewegungsaufnahme hat keinen Vorlauf: Bilder vor der Freigabe werden nicht
+rückwirkend gespeichert. Die Nachlaufzeit dagegen ist ausdrücklich eingebaut.
+Bei einem Segmentwechsel wird der Encoder geschlossen und neu geöffnet; die
+Kameraabholung läuft unabhängig weiter, solange die Queue Platz hat.
+
+Wo man bei Änderungen ansetzt
+----------------------------
+  Andere Bildrate, Auflösung, Nachlaufzeit oder Schwellen:
+    Zuerst die vorhandenen Kommandozeilenoptionen nutzen; für neue Standardwerte
+    ist parse_args() zuständig.
+  Andere reale Kameraeinstellungen:
+    open_cameras(). Gerätespezifische Grenzen berücksichtigen.
+  Andere Erkennung von Bildänderungen:
+    MotionDetector.update(). Der Aufrufer liegt im Top-Zweig von capture_loop().
+  Andere Regeln für Start, Nachlauf oder Segmentwechsel:
+    RecordingGate.trigger() und select(). Beide Kamera-Threads nutzen sie.
+  Anderes Videoformat oder andere Schreibmetadaten:
+    VideoSink.run(); bei geänderter Paketstruktur auch capture_loop und Tests.
+  Weitere Diagnose der empfangenen Bilder:
+    FrameTracker und gegebenenfalls capture_loop/main für Bericht und Gesamtflag.
+  Strengere Prüfung gespeicherter Bilder:
+    verify_session(). Reines Zählen erkennt keine vertauschten oder duplizierten
+    Bildinhalte, wenn die Gesamtzahl unverändert bleibt.
+
+Empfohlene Lesereihenfolge im Quellcode: erst main() für den Gesamtablauf,
+dann capture_loop() für den Bildweg, danach RecordingGate und MotionDetector,
+anschließend VideoSink und FrameTracker und zuletzt die Tests. Beim Lesen
+immer unterscheiden: Kameraempfang, Aufnahmeauswahl, Queue-Annahme,
+Schreibabschluss und tatsächlich decodierbares Video sind fünf verschiedene
+Stationen mit jeweils eigenen Aussagen und möglichen Fehlern.

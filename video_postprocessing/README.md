@@ -3,7 +3,7 @@
 Aus dem Projektverzeichnis ausführen (Ordnerpfade mit Leerzeichen in Anführungszeichen):
 
 ```powershell
-python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c2\sick\20261015_101348_332921_mice_c2_sick_stim" to
+python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c2\sick\20261015_101357_332778_mice_c2_sick_home" top
 Für die andere Kamera `top` durch `side` ersetzen. Benötigt werden `session.json`,
 `top_frames.csv` bzw. `side_frames.csv` und alle zugehörigen AVI-Segmente im Ordner.
 Das Format entspricht `optimized_recording/run_single_module.py`.

@@ -7,6 +7,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+import warnings
 from pathlib import Path
 
 import cv2
@@ -15,17 +16,32 @@ import numpy as np
 
 def read_timeline(folder, camera):
     """Validate the metadata before starting an expensive encode."""
-    session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
-    if session.get('status') != 'stopped':
-        raise ValueError('Session is not marked stopped; finish recording first.')
-    fps = float(session['configuration']['fps'])
-    if not math.isfinite(fps) or fps <= 0:
-        raise ValueError('Invalid FPS in session.json')
-    selected = next((c for c in session['cameras'] if c['name'] == camera), None)
-    if selected is None:
-        raise ValueError(f'Camera {camera!r} is absent from session.json')
+    try:
+        session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        session = {}
+    if not isinstance(session, dict):
+        session = {}
+    try:
+        fps = float(session['configuration']['fps'])
+    except (KeyError, TypeError, ValueError):
+        fps = None
+    if fps is not None and (not math.isfinite(fps) or fps <= 0):
+        fps = None
+    try:
+        selected = next((c for c in session['cameras'] if c['name'] == camera), None)
+        metadata = selected['writer']['clips']
+        complete = isinstance(metadata, list) and all(
+            isinstance(c, dict) and 'file' in c and 'write_calls_completed' in c
+            for c in metadata)
+    except (KeyError, TypeError):
+        metadata, complete = [], False
+    fallback = session.get('status') != 'stopped' or not complete or fps is None
+    if fallback:
+        warnings.warn('Incomplete session.json: using frame CSV and AVI files. '
+                      'Run only after recording has ended.', RuntimeWarning)
     clips = {}
-    for clip in selected['writer']['clips']:
+    for clip in ([] if fallback else metadata):
         filename = clip['file']
         if Path(filename).name != filename or not filename.startswith(camera + '_'):
             raise ValueError(f'Unexpected clip filename: {filename}')
@@ -44,6 +60,11 @@ def read_timeline(folder, camera):
             segment = int(row['segment'])
             index = int(row['video_frame_index'])
             timestamp = int(row['host_monotonic_ns'])
+            if fallback and segment not in clips:
+                filename = f'{camera}_{segment:06d}.avi'
+                if not (folder / filename).is_file():
+                    raise ValueError(f'Missing video: {filename}')
+                clips[segment] = dict(file=filename)
             if segment not in clips:
                 raise ValueError(f'CSV references unknown segment {segment}')
             if segment != previous_segment and segment in counts:
@@ -61,8 +82,22 @@ def read_timeline(folder, camera):
     if set(counts) != set(clips):
         raise ValueError('CSV and session.json contain different segments')
     for segment, clip in clips.items():
-        if counts[segment] != clip['write_calls_completed']:
+        if fallback:
+            clip['write_calls_completed'] = counts[segment]
+        elif counts[segment] != clip['write_calls_completed']:
             raise ValueError(f'CSV/frame count mismatch for {clip["file"]}')
+    if fps is None:
+        for clip in clips.values():
+            capture = cv2.VideoCapture(str(folder / clip['file']))
+            try:
+                candidate = capture.get(cv2.CAP_PROP_FPS)
+            finally:
+                capture.release()
+            if not math.isfinite(candidate) or candidate <= 0:
+                raise ValueError(f'Cannot determine FPS from {clip["file"]}')
+            if fps is not None and not math.isclose(fps, candidate, rel_tol=1e-6):
+                raise ValueError('Video segments have different FPS')
+            fps = candidate
     return fps, clips, first_time
 
 
@@ -172,7 +207,7 @@ def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('folder', type=Path, help='Recording folder containing session.json')
+    parser.add_argument('folder', type=Path, help='Recording folder containing frame CSVs and AVI segments')
     parser.add_argument('camera', choices=('side', 'top'))
     parser.add_argument('--output', type=Path, help='Output MP4; default: CAMERA_merged.mp4 in recording folder')
     parser.add_argument('--ffmpeg', default='ffmpeg', help='FFmpeg executable or full path')

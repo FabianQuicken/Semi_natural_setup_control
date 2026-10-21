@@ -71,6 +71,40 @@ class MergeTests(unittest.TestCase):
                 merge(folder, 'top')
             self.assertFalse((folder / 'top_merged.mp4').exists())
 
+    def test_csv_fallback(self):
+        for camera in ('top', 'side'):
+            for state in ('recording', 'missing_writer', 'missing_json', 'invalid_json'):
+                with self.subTest(camera=camera, state=state), tempfile.TemporaryDirectory() as directory:
+                    folder = Path(directory)
+                    self.fixture(folder, camera)
+                    path = folder / 'session.json'
+                    session = json.loads(path.read_text())
+                    if state == 'missing_json':
+                        path.unlink()
+                    elif state == 'invalid_json':
+                        path.write_text('{')
+                    else:
+                        if state == 'recording':
+                            session['status'] = 'recording'
+                        del session['cameras'][0]['writer']
+                        path.write_text(json.dumps(session))
+                    with self.assertWarnsRegex(RuntimeWarning, 'using frame CSV'):
+                        result = merge(folder, camera)
+                    self.assertEqual(result['fps'], 10)
+                    self.assertEqual(result['recorded_frames'], 4)
+                    self.assertEqual(result['black_frames'], 4)
+                    self.assertEqual(result['total_frames'], 8)
+
+    def test_fallback_missing_video_does_not_publish_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            self.fixture(folder, 'top')
+            (folder / 'session.json').unlink()
+            (folder / 'top_000002.avi').unlink()
+            with self.assertWarns(RuntimeWarning), self.assertRaisesRegex(ValueError, 'Missing video'):
+                merge(folder, 'top')
+            self.assertFalse((folder / 'top_merged.mp4').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

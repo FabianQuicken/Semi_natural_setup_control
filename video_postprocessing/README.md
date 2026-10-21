@@ -3,11 +3,22 @@
 Aus dem Projektverzeichnis ausführen (Ordnerpfade mit Leerzeichen in Anführungszeichen):
 
 ```powershell
-python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c2\sick\20261015_101357_332778_mice_c2_sick_home" top
+python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\habituation\20261020_100930_030051_mice_c3_habituation_home" top
+```
 Für die andere Kamera `top` durch `side` ersetzen. Benötigt werden `session.json`,
 `top_frames.csv` bzw. `side_frames.csv` und alle zugehörigen AVI-Segmente im Ordner.
 Das Format entspricht `optimized_recording/run_single_module.py`.
-Die Aufnahme muss beendet sein (`status: stopped`).
+Die Aufnahme muss beendet sein. Bei fehlender, unlesbarer oder unvollstaendiger
+`session.json` (z. B. Status `recording` nach Stromausfall) greift automatisch
+der CSV-Fallback: Segmente und Frame-Anzahlen kommen aus `top_frames.csv`
+bzw. `side_frames.csv`, zugeordnet zu `top_000001.avi` usw. Dafuer ist kein
+zusaetzlicher Parameter erforderlich. Ohne gueltige FPS in der JSON werden
+die FPS aus den AVI-Dateien gelesen und auf Uebereinstimmung geprueft.
+Die CSV-Zeitstempel bleiben die Grundlage fuer die zeitliche Anordnung.
+Beschaedigte Videos oder Abweichungen zwischen CSV und dekodierbaren Frames
+fuehren weiterhin zum Abbruch. Der Fallback repariert keine Videodateien.
+Da auch die CSV gepuffert geschrieben wird, koennen bei Stromausfall ihre
+letzten Eintraege fehlen.
 
 Abhängigkeiten: `python -m pip install numpy opencv-python` sowie FFmpeg mit
 `libx264` im PATH. Alternativ `--ffmpeg "C:\Pfad\ffmpeg.exe"` angeben.

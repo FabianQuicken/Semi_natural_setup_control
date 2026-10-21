@@ -106,5 +106,60 @@ class MergeTests(unittest.TestCase):
             self.assertFalse((folder / 'top_merged.mp4').exists())
 
 
+class DLCRegressionTests(unittest.TestCase):
+    def test_single_and_multi_animal_h5(self):
+        import pandas as pd
+        from video_postprocessing.merge_videos import prediction_points
+        for multi in (False, True):
+            names = ['scorer', 'individuals', 'bodyparts', 'coords'] if multi else ['scorer', 'bodyparts', 'coords']
+            prefix = ('model', 'mouse1', 'nose') if multi else ('model', 'nose')
+            columns = pd.MultiIndex.from_tuples([(*prefix, c) for c in ('x', 'y', 'likelihood')], names=names)
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'predictions.h5'
+                for likelihood, expected in ((0.6, 0), (0.61, 1), (float('nan'), 0)):
+                    pd.DataFrame([[10, 12, likelihood]], columns=columns).to_hdf(path, key='df_with_missing', mode='w')
+                    self.assertEqual(len(prediction_points(pd.read_hdf(path), 0.6)), expected)
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'FFmpeg is required')
+    def test_dlc_fill_and_control_artifacts(self):
+        import pandas as pd
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        for accepted in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                MergeTests().fixture(folder, 'top')
+                config = folder / 'config.yaml'
+                config.write_text('test config')
+                calls = []
+                def analyze(config, videos, destfolder, auto_track):
+                    video = Path(videos[0])
+                    capture = cv2.VideoCapture(str(video))
+                    self.assertTrue(capture.read()[0])
+                    self.assertFalse(capture.read()[0])
+                    capture.release()
+                    calls.append(video)
+                    columns = pd.MultiIndex.from_product([['model'], ['mouse1'], ['nose'], ['x', 'y', 'likelihood']], names=['scorer', 'individuals', 'bodyparts', 'coords'])
+                    pd.DataFrame([[10, 12, 0.9 if accepted else 0.2]], columns=columns).to_hdf(Path(destfolder) / (video.stem + 'DLC.h5'), key='df_with_missing')
+                with patch.dict('sys.modules', {'deeplabcut': SimpleNamespace(analyze_videos=analyze)}):
+                    result = merge(folder, 'top', dlc_config=config)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(result['held_frames'], 3 if accepted else 0)
+                self.assertEqual(result['black_frames'], 1 if accepted else 4)
+                root = Path(result['dlc_control_dir'])
+                self.assertEqual(len(list((root / ('accepted' if accepted else 'rejected')).glob('*.png'))), 2)
+                capture = cv2.VideoCapture(result['output'])
+                means = []
+                while True:
+                    ok, frame = capture.read()
+                    if not ok:
+                        break
+                    means.append(frame.mean())
+                capture.release()
+                self.assertLess(means[1], 3)
+                for index in (3, 4, 5):
+                    self.assertAlmostEqual(means[index], 80 if accepted else 0, delta=5)
+
+
 if __name__ == '__main__':
     unittest.main()

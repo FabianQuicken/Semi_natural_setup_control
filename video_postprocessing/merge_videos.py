@@ -102,11 +102,96 @@ def read_timeline(folder, camera):
 
 
 def filler_frame(shape):
-    """Extension point for future sleep detection; currently always black."""
+    """Default filler when no positively classified segment end is available."""
     return np.zeros(shape, dtype=np.uint8)
 
 
-def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
+def prediction_points(data, threshold):
+    """Read single/multi-animal DLC columns without assuming individual names."""
+    if len(data) != 1 or 'coords' not in data.columns.names:
+        raise ValueError('Expected a DLC H5 table with exactly one frame and coords columns')
+    axis = data.columns.names.index('coords')
+    points = []
+    likelihoods = 0
+    for column in data.columns:
+        if column[axis] != 'likelihood':
+            continue
+        likelihoods += 1
+        value = float(data.iloc[0][column])
+        if not np.isfinite(value) or value <= threshold:
+            continue
+        coordinates = []
+        for coordinate in ('x', 'y'):
+            key = list(column)
+            key[axis] = coordinate
+            coordinates.append(float(data.iloc[0][tuple(key)]))
+        if not all(np.isfinite(coordinates)):
+            raise ValueError('Confident DLC prediction has invalid coordinates')
+        label = '/'.join(str(v) for i, v in enumerate(column) if i != axis)
+        points.append((*coordinates, value, label))
+    if not likelihoods:
+        raise ValueError('DLC H5 has no likelihood columns')
+    return points
+
+
+class DLCFrameChecker:
+    def __init__(self, config, threshold, root):
+        self.config = Path(config).resolve()
+        if not self.config.is_file():
+            raise ValueError(f'DLC config does not exist: {self.config}')
+        if not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError('DLC likelihood must be between 0 and 1')
+        try:
+            import deeplabcut
+            import pandas
+        except ImportError as exc:
+            raise RuntimeError('DLC mode requires DeepLabCut, pandas and PyTables in this environment') from exc
+        self.dlc, self.pandas = deeplabcut, pandas
+        self.threshold = threshold
+        root.mkdir(parents=True, exist_ok=True)
+        self.root = Path(tempfile.mkdtemp(prefix='run_', dir=root))
+        for name in ('accepted', 'rejected', 'analysis'):
+            (self.root / name).mkdir()
+
+    def check(self, frame, filename, fps, fill_count):
+        name = Path(filename).stem
+        destination = self.root / 'analysis' / name
+        destination.mkdir()
+        video = destination / f'{name}_last.avi'
+        height, width = frame.shape[:2]
+        writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*'MJPG'), fps, (width, height))
+        try:
+            if not writer.isOpened():
+                raise RuntimeError(f'Cannot create DLC input: {video}')
+            writer.write(frame)
+        finally:
+            writer.release()
+        self.dlc.analyze_videos(str(self.config), [str(video)],
+                                destfolder=str(destination), auto_track=True)
+        results = list(destination.glob(f'{video.stem}*.h5'))
+        if len(results) != 1:
+            raise RuntimeError(f'Expected one DLC H5 result in {destination}, found {len(results)}')
+        points = prediction_points(self.pandas.read_hdf(results[0]), self.threshold)
+        accepted = bool(points)
+        preview = frame.copy()
+        for x, y, likelihood, label in points:
+            position = (int(round(x)), int(round(y)))
+            cv2.circle(preview, position, 4, (0, 255, 0), -1)
+            cv2.putText(preview, f'{label}: {likelihood:.2f}', position,
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+        path = self.root / ('accepted' if accepted else 'rejected') / f'{name}_last.png'
+        if not cv2.imwrite(str(path), preview):
+            raise RuntimeError(f'Cannot save DLC control image: {path}')
+        (destination / 'decision.json').write_text(json.dumps(dict(
+            source=filename, config=str(self.config), threshold=self.threshold,
+            accepted=accepted, gap_frames=fill_count,
+            filled_frames=fill_count if accepted else 0,
+            predictions=points), indent=2), encoding='utf-8')
+        return accepted
+
+
+def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18,
+          dlc_config=None, dlc_likelihood=0.6, dlc_control_dir=None):
     folder = Path(folder).resolve()
     output = Path(output).resolve() if output else folder / f'{camera}_merged.mp4'
     if output.suffix.lower() != '.mp4':
@@ -119,10 +204,15 @@ def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
     fps, clips, origin = read_timeline(folder, camera)
     if not output.parent.is_dir():
         raise ValueError(f'Output directory does not exist: {output.parent}')
+    checker = DLCFrameChecker(dlc_config, dlc_likelihood,
+                              Path(dlc_control_dir).resolve() if dlc_control_dir else
+                              folder / f'{camera}_dlc_control') if dlc_config else None
     # Keep RAM use bounded: stream the CSV and decode only one frame at a time.
     capture = None
     process = None
     written = recorded = black_count = delayed = 0
+    held_count = 0
+    last_frame = None
     current = None
     shape = None
     with tempfile.TemporaryDirectory(prefix='video_merge_', dir=output.parent) as temp:
@@ -132,11 +222,16 @@ def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
                 with (folder / f'{camera}_frames.csv').open(newline='', encoding='utf-8-sig') as handle:
                     for row in csv.DictReader(handle):
                         segment = int(row['segment'])
+                        target = math.floor((int(row['host_monotonic_ns']) - origin) * fps / 1e9 + 0.5)
+                        missing = max(0, target - written)
+                        hold = False
                         if segment != current:
                             if capture is not None:
                                 if capture.read()[0]:
                                     raise ValueError(f'Video has more frames than CSV: {clips[current]["file"]}')
                                 capture.release()
+                                if checker is not None:
+                                    hold = checker.check(last_frame, clips[current]['file'], fps, missing)
                             filename = clips[segment]['file']
                             print(f'Processing {filename}', flush=True)
                             capture = cv2.VideoCapture(str(folder / filename))
@@ -167,13 +262,17 @@ def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
                         delayed += target < written
                         missing = max(0, target - written)
                         for _ in range(missing):
-                            process.stdin.write(black)
+                            process.stdin.write(last_frame.tobytes() if hold else black)
                         process.stdin.write(frame.tobytes())
-                        black_count += missing
+                        held_count += missing if hold else 0
+                        black_count += 0 if hold else missing
+                        last_frame = frame
                         recorded += 1
                         written += missing + 1
                 if capture.read()[0]:
                     raise ValueError(f'Video has more frames than CSV: {clips[current]["file"]}')
+                if checker is not None:
+                    checker.check(last_frame, clips[current]['file'], fps, 0)
                 process.stdin.close()
                 if process.wait() != 0:
                     raise RuntimeError('FFmpeg encoding failed')
@@ -199,8 +298,10 @@ def merge(folder, camera, output=None, ffmpeg='ffmpeg', crf=18):
         with temporary.open('rb') as source, output.open('xb') as destination:
             shutil.copyfileobj(source, destination)
     result = dict(output=str(output), fps=fps, recorded_frames=recorded,
-                  black_frames=black_count, total_frames=written,
+                  black_frames=black_count, held_frames=held_count, total_frames=written,
                   duration_seconds=written / fps, frames_shifted_by_timing_jitter=delayed)
+    if checker is not None:
+        result['dlc_control_dir'] = str(checker.root)
     print(json.dumps(result, indent=2))
     return result
 
@@ -211,11 +312,15 @@ def main():
     parser.add_argument('camera', choices=('side', 'top'))
     parser.add_argument('--output', type=Path, help='Output MP4; default: CAMERA_merged.mp4 in recording folder')
     parser.add_argument('--ffmpeg', default='ffmpeg', help='FFmpeg executable or full path')
+    parser.add_argument('--dlc-config', type=Path, help='DLC config.yaml; enables segment-end analysis')
+    parser.add_argument('--dlc-likelihood', type=float, default=0.6, help='Strict likelihood threshold (default: 0.6)')
+    parser.add_argument('--dlc-control-dir', type=Path, help='Root for DLC inputs, results and control images')
     parser.add_argument('--crf', type=int, default=18, choices=range(0, 52), metavar='0..51',
                         help='H.264 quality: lower is better/larger; 18 by default (lossy)')
     args = parser.parse_args()
     try:
-        merge(args.folder, args.camera, args.output, args.ffmpeg, args.crf)
+        merge(args.folder, args.camera, args.output, args.ffmpeg, args.crf,
+              args.dlc_config, args.dlc_likelihood, args.dlc_control_dir)
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         parser.exit(1, f'Error: {exc}\n')
 

@@ -48,5 +48,45 @@ vorübergehend Platz für zwei Ausgabedateien benötigt.
 
 Fehlende Videos, inkonsistente CSV-Indizes/Frame-Anzahlen und Decoderfehler
 führen zum Abbruch. Es wird kein Ersatz für fehlende/defekte Quelldateien
-erfunden. `filler_frame()` ist die Erweiterungsstelle für eine spätere Logik;
-aktuell gibt es ausschließlich schwarze Füllbilder, keine Schlaferkennung.
+erfunden. Ohne DLC-Konfiguration bleiben alle F?llbilder schwarz.
+
+## Optional: Segment-Endbilder mit DeepLabCut pr?fen
+
+```powershell
+python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\baseline\20261021_100830_142931_mice_c3_baseline_home" top --dlc-config "C:\DLC-Projekt\config.yaml" --dlc-likelihood 0.6
+```
+
+Im Python-Environment m?ssen das trainierte DeepLabCut-Netzwerk sowie pandas
+und PyTables verf?gbar sein. Pro Segment wird das letzte Bild als Ein-Frame-AVI
+(MJPG) gespeichert und mit `deeplabcut.analyze_videos(..., auto_track=True)`
+analysiert. Die H5-Auswertung unterst?tzt Single- und Multi-Animal-Spalten.
+Mindestens ein Punkt mit endlichen Koordinaten und einer Likelihood strikt
+?ber dem Grenzwert gen?gt. Das urspr?ngliche Endbild f?llt dann die L?cke zum
+n?chsten Segment. Ohne einen solchen Punkt bleibt diese L?cke schwarz.
+L?cken innerhalb eines Segments bleiben immer schwarz. Die Markierungen
+erscheinen ausschlie?lich auf den Kontrollbildern.
+
+Unter `CAMERA_dlc_control/run_.../` entstehen pro Lauf:
+
+- `accepted/`: Endbilder mit eingezeichneten Punkten und Likelihoods.
+- `rejected/`: Endbilder ohne ausreichend sichere Vorhersage.
+- `analysis/SEGMENT/`: Ein-Frame-AVI, DLC-Ergebnisse und `decision.json` mit
+  Konfiguration, Grenzwert, Vorhersagen und Anzahl tats?chlich erg?nzter Frames.
+
+Mit `--dlc-control-dir` l?sst sich das Stammverzeichnis ?ndern. Jeder Lauf hat
+einen eigenen Ordner; Ergebnisse ?lterer L?ufe werden nicht wiederverwendet.
+Auch das letzte Segment wird gepr?ft, erg?nzt aber keine Zeit nach Aufnahmeende.
+`accepted` bedeutet f?r die F?llung geeignet; bei fehlender anschlie?ender L?cke
+ist `filled_frames` in der Entscheidungsdatei null. Die Zusammenfassung z?hlt
+`held_frames` und `black_frames` getrennt.
+
+Fehlende, mehrdeutige oder fehlerhafte H5-Ergebnisse f?hren zum Abbruch, nicht
+zu einer Einstufung als ?keine Maus?. Eine niedrige Likelihood bedeutet lediglich,
+dass keine ausreichend sichere Erkennung vorliegt. Bei Multi-Animal-Projekten
+muss die verwendete DLC-Version mit ihrer Tracking-Konfiguration H5-Ergebnisse
+auch f?r ein einzelnes Frame erzeugen k?nnen; zeitliche Track-Filter k?nnen dies
+verhindern. Dieser Netzwerkschritt ist mit dem konkreten Projekt zu pr?fen.
+Die bisherige automatisierte Pr?fung verwendet simulierte DLC-Inferenz und
+reale H5-, AVI- und MP4-Dateien.
+
+DLC-Aufruf und H5-Ausgabe: [offizielle DLC-Dokumentation](https://deeplabcut.github.io/DeepLabCut/docs/standardDeepLabCut_UserGuide).

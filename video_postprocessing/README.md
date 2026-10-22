@@ -1,92 +1,147 @@
 # Videos einer Aufnahme zusammenfügen
 
-Aus dem Projektverzeichnis ausführen (Ordnerpfade mit Leerzeichen in Anführungszeichen):
+Im Projektverzeichnis ausführen. Die Aufnahme muss beendet sein. Benötigt werden
+`session.json`, `top_frames.csv` bzw. `side_frames.csv` und die zugehörigen AVI-Fragmente.
+Die Originalvideos und das trainierte DLC-Projekt werden nicht verändert.
+
+## Vorliegende Aufnahme mit geprüften Entscheidungen
+
+Die bereits geprüfte JSON-Datei dieser Aufnahme kann ohne erneute DLC-Inferenz verwendet werden:
 
 ```powershell
-python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\habituation\20261020_100930_030051_mice_c3_habituation_home" top
+python -B video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\baseline\20261021_100830_142931_mice_c3_baseline_home" top --gap-decisions "E:\Fabi_Setup\merge_testing\gap_decisions_reviewed.json"
 ```
-Für die andere Kamera `top` durch `side` ersetzen. Benötigt werden `session.json`,
-`top_frames.csv` bzw. `side_frames.csv` und alle zugehörigen AVI-Segmente im Ordner.
-Das Format entspricht `optimized_recording/run_single_module.py`.
-Die Aufnahme muss beendet sein. Bei fehlender, unlesbarer oder unvollstaendiger
-`session.json` (z. B. Status `recording` nach Stromausfall) greift automatisch
-der CSV-Fallback: Segmente und Frame-Anzahlen kommen aus `top_frames.csv`
-bzw. `side_frames.csv`, zugeordnet zu `top_000001.avi` usw. Dafuer ist kein
-zusaetzlicher Parameter erforderlich. Ohne gueltige FPS in der JSON werden
-die FPS aus den AVI-Dateien gelesen und auf Uebereinstimmung geprueft.
-Die CSV-Zeitstempel bleiben die Grundlage fuer die zeitliche Anordnung.
-Beschaedigte Videos oder Abweichungen zwischen CSV und dekodierbaren Frames
-fuehren weiterhin zum Abbruch. Der Fallback repariert keine Videodateien.
-Da auch die CSV gepuffert geschrieben wird, koennen bei Stromausfall ihre
-letzten Eintraege fehlen.
 
-Abhängigkeiten: `python -m pip install numpy opencv-python` sowie FFmpeg mit
-`libx264` im PATH. Alternativ `--ffmpeg "C:\Pfad\ffmpeg.exe"` angeben.
+Standardziel ist der neue Unterordner `top_merge` im Aufnahmeordner. Darin liegen
+`top_merged.mp4` und alle Kontrolldateien. Für die andere Kamera `top` durch `side` ersetzen.
+Mit `--destination "E:\Fabi_Setup\merge_testing\neuer_testlauf"` kann ein anderes
+Zielverzeichnis gewählt werden. Bestehende Videos und `control`-Ordner werden niemals
+überschrieben; für einen weiteren Lauf ein neues Ziel verwenden. Nach einem Abbruch
+bleiben die bisherigen Kontrolldateien und `status.json` zur Fehlersuche erhalten.
 
-Das Ergebnis heißt `top_merged.mp4` bzw. `side_merged.mp4`. Mit
-`--output "C:\Ziel\aufnahme.mp4"` lässt sich ein anderes Ziel wählen.
-Vorhandene Ausgaben werden nicht überschrieben; Originaldateien bleiben erhalten.
+`--output` erlaubt einen eigenen MP4-Dateinamen innerhalb des Zielordners. Wird nur
+`--output` angegeben, ist dessen übergeordneter Ordner das Ziel für alle Ergebnisse.
 
-Die FPS kommen aus der JSON-Konfiguration. Die CSV-Zeitstempel
-`host_monotonic_ns` bestimmen die Position der Bilder auf einem konstanten
-Frame-Raster. Freie Positionen werden schwarz gefüllt, auch innerhalb eines
-Segments. Die Ausgabe beginnt beim ersten gespeicherten Frame und endet beim
-letzten. Pausen davor/danach werden nicht ergänzt: `elapsed_seconds` enthält
-auch Initialisierung/Aufräumen und liefert dafür keine zuverlässigen Grenzen.
-Die Zeitauflösung ist ein Frame; Host-Zeitstempel messen den Abruf, nicht die
-Belichtung. Bei Zeitstempel-Jitter werden kollidierende Bilder auf die nächste
-freie Position verschoben, damit kein Originalframe verloren geht. Dadurch
-kann die Ausgabe etwas länger werden; die Zusammenfassung zählt solche Bilder.
-Kamera-Ticks werden ohne bekannte Tick-Frequenz nicht als Sekunden interpretiert.
+## Füllregeln und Zeitachse
 
-H.264 komprimiert schwarze Abschnitte sehr gut. Trotzdem wird jedes Ausgabeframe
-encodiert; lange Pausen benötigen entsprechend Rechenzeit. Die Verarbeitung
-lädt nicht die ganze Aufnahme in den RAM. Die Standardeinstellung `--crf 18`
-ist verlustbehaftet und konvertiert nach YUV420; die Originalvideos daher für
-quantitative Bildanalysen aufbewahren. Während der abschließenden Kopie wird
-vorübergehend Platz für zwei Ausgabedateien benötigt.
+- **Kurze Lücken innerhalb eines Fragments:** Das letzte dekodierte Originalbild wird
+  wiederholt, wenn die fehlende Ausgabezeit höchstens **0,1 Sekunden** beträgt
+  (bei 30 FPS bis zu drei Füllbilder). Das verhindert schwarze Blitze durch Zeitstempel-Jitter.
+  Mit `--short-gap-seconds 0.05` lässt sich die Grenze ändern; `0` deaktiviert die Wiederholung.
+- **Längere Lücken innerhalb eines Fragments:** schwarze Bilder.
+- **Lücken zwischen Fragmenten:** Bei positiver DLC-Erkennung bzw. JSON-Entscheidung
+  `hold` wird das letzte Originalbild des vorherigen Fragments wiederholt. Andernfalls
+  werden schwarze Bilder eingesetzt. Kurze Fragmentgrenzen werden ebenfalls nach
+  dieser Anwesenheitsentscheidung behandelt, nicht automatisch gehalten.
+- **DLC-Fehler:** schwarze Bilder für die betroffene Fragmentlücke; Warnung und
+  Fehlertext werden gespeichert, die Verarbeitung läuft weiter. Das gilt auch für
+  fehlende DLC-Abhängigkeiten und fehlende, mehrdeutige oder ungültige H5-Ergebnisse.
+- **Nahtlose Fragmentgrenzen:** keine Füllbilder. Nach dem letzten Fragment wird
+  keine zusätzliche Zeit ergänzt.
 
-Fehlende Videos, inkonsistente CSV-Indizes/Frame-Anzahlen und Decoderfehler
-führen zum Abbruch. Es wird kein Ersatz für fehlende/defekte Quelldateien
-erfunden. Ohne DLC-Konfiguration bleiben alle F?llbilder schwarz.
+Die CSV-Spalte `host_monotonic_ns` bestimmt die Position jedes Bildes auf einem
+konstanten FPS-Raster. Die Ausgabe beginnt mit dem ersten gespeicherten Bild.
+Wenn mehrere Originalbilder auf dieselbe Position fallen, bleibt das erste dort;
+weitere werden nur in der Ausgabe ausgelassen und gezählt. Alle Originalbilder
+werden trotzdem dekodiert und geprüft. Die Zeitachse wird nicht verschoben.
+Das tatsächliche letzte Quellbild bleibt auch bei solchen Kollisionen das Bild für
+anschließende Wiederholungen und für `last.png`.
 
-## Optional: Segment-Endbilder mit DeepLabCut pr?fen
+Die Zeitauflösung ist ein Frame. Host-Zeitstempel messen den Abruf, nicht die
+Belichtung. Schwarze Bilder bzw. Wiederholungen rekonstruieren keine unbeobachtete
+Bewegung während einer Aufnahmepause.
+
+## Kontrolle im Zielordner
+
+```text
+top_merge/
+  top_merged.mp4
+  summary.json
+  status.json
+  ffmpeg.log
+  control/
+    gaps.jsonl
+    top_000001/
+      first.png
+      last.png
+      decision.json
+    top_000002/
+      first.png
+      last.png
+      decision.json
+    dlc/                         # bei tatsächlicher DLC-Inferenz für Lücken
+      top_000001/
+        last.avi
+        prediction.png
+        decision.json
+        ... DLC-Ergebnisse ...
+```
+
+`first.png` und `last.png` zeigen die tatsächlichen ersten und letzten dekodierten
+Quellbilder jedes Fragments ohne Markierungen. `decision.json` enthält die
+Quellzeitstempel, Frame-Anzahlen, ausgelassene Kollisionen, interne Füllbildzahlen
+und die Entscheidung zur folgenden Fragmentlücke einschließlich Grund,
+Füllbildanzahl und gegebenenfalls DLC-Fehlertext. Auch das letzte Fragment erhält
+Kontrollbilder und den Grund `end_of_recording`.
+
+`gaps.jsonl` enthält pro interner Lücke und pro Fragmentgrenze einen JSON-Datensatz:
+Ausgabestartframe (nullbasiert), Länge, `hold`/`black`/`none` und Grund. Zusammen mit
+`first.png` des nächsten Fragments lässt sich jede Grenze kontrollieren.
+`fill_seconds` ist die tatsächlich ergänzte Zeit; `source_interval_seconds` an
+Fragmentgrenzen ist der Zeitabstand der beiden Quellbilder inklusive eines
+regulären Frame-Intervalls und kann deshalb um ungefähr 1/FPS größer sein.
+`summary.json` zählt schwarze, gehaltene und wegen Kollision ausgelassene Bilder;
+`status.json` unterscheidet `running`, `failed` und `complete`.
+
+## Neue Entscheidungen mit DeepLabCut erzeugen
 
 ```powershell
-python video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\baseline\20261021_100830_142931_mice_c3_baseline_home" top --dlc-config "C:\DLC-Projekt\config.yaml" --dlc-likelihood 0.6
+python -B video_postprocessing/merge_videos.py "Z:\n2023_odor_related_behavior\2026_sick_behavior\raw\c3\baseline\20261021_100830_142931_mice_c3_baseline_home" top --dlc-config "E:\Fabi_Setup\In_Soundchamber\multi_animal\multi_animal-Fabi-2026-10-14\config.yaml" --dlc-shuffle 2 --dlc-likelihood 0.6 --destination "E:\Fabi_Setup\merge_testing\neuer_dlc_lauf"
 ```
 
-Im Python-Environment m?ssen das trainierte DeepLabCut-Netzwerk sowie pandas
-und PyTables verf?gbar sein. Pro Segment wird das letzte Bild als Ein-Frame-AVI
-(MJPG) gespeichert und mit `deeplabcut.analyze_videos(..., auto_track=True)`
-analysiert. Die H5-Auswertung unterst?tzt Single- und Multi-Animal-Spalten.
-Mindestens ein Punkt mit endlichen Koordinaten und einer Likelihood strikt
-?ber dem Grenzwert gen?gt. Das urspr?ngliche Endbild f?llt dann die L?cke zum
-n?chsten Segment. Ohne einen solchen Punkt bleibt diese L?cke schwarz.
-L?cken innerhalb eines Segments bleiben immer schwarz. Die Markierungen
-erscheinen ausschlie?lich auf den Kontrollbildern.
+DLC wird nur für Fragmentenden mit anschließender Lücke geladen. Die Eingabe ist
+jeweils ein Ein-Frame-MJPG-AVI im Zielordner. Der Aufruf verwendet
+`auto_track=False, save_as_df=True, batch_size=1`: Anwesenheitserkennung benötigt
+kein zeitliches Tracking. Single- und Multi-Animal-H5-Spalten werden unterstützt.
+Mindestens ein Punkt mit endlichen Koordinaten innerhalb des Bildes und einer
+Likelihood **strikt über** dem Grenzwert führt zu `hold`.
 
-Unter `CAMERA_dlc_control/run_.../` entstehen pro Lauf:
+Shuffle 2 ist hier Standard, weil er die beiden Beispielgrenzen korrekt erkannte;
+Shuffle 1 verfehlte in diesem Projekt auch sichtbare Mäuse. Andere Projekte können
+`--dlc-shuffle 1` benötigen. Die Regel kann Fehlalarme auf dunkler Einstreu liefern.
+Niedrige Likelihood beweist keine Abwesenheit, insbesondere bei verdeckten Mäusen.
+Deshalb die Kontrollbilder prüfen oder eine geprüfte JSON-Datei verwenden.
+DLC-Fehler führen wie oben beschrieben zu Schwarz, nicht zur Annahme einer Maus.
+Dateisystemfehler beim Speichern der Kontrollen und defekte Quellvideos bleiben
+harte Fehler, damit keine unvollständig dokumentierte oder erfundene Aufnahme entsteht.
 
-- `accepted/`: Endbilder mit eingezeichneten Punkten und Likelihoods.
-- `rejected/`: Endbilder ohne ausreichend sichere Vorhersage.
-- `analysis/SEGMENT/`: Ein-Frame-AVI, DLC-Ergebnisse und `decision.json` mit
-  Konfiguration, Grenzwert, Vorhersagen und Anzahl tats?chlich erg?nzter Frames.
+`--gap-decisions` und `--dlc-config` sind Alternativen. Eine einfache JSON-Datei
+ordnet jedem AVI-Dateinamen `black` oder `hold` zu. Das geprüfte Format mit
+`source_folder`, `camera`, `timeline_sha256` und `decisions` wird ebenfalls
+unterstützt und vor dem Start gegen die Aufnahme geprüft. Ohne beide Optionen
+bleiben Fragmentlücken schwarz; kurze interne Lücken werden weiterhin gehalten.
 
-Mit `--dlc-control-dir` l?sst sich das Stammverzeichnis ?ndern. Jeder Lauf hat
-einen eigenen Ordner; Ergebnisse ?lterer L?ufe werden nicht wiederverwendet.
-Auch das letzte Segment wird gepr?ft, erg?nzt aber keine Zeit nach Aufnahmeende.
-`accepted` bedeutet f?r die F?llung geeignet; bei fehlender anschlie?ender L?cke
-ist `filled_frames` in der Entscheidungsdatei null. Die Zusammenfassung z?hlt
-`held_frames` und `black_frames` getrennt.
+DLC-Aufruf: [offizielle API-Dokumentation](https://deeplabcut.github.io/DeepLabCut/dev/latest-release/reference/deeplabcut/pose_estimation_pytorch/apis/videos/).
 
-Fehlende, mehrdeutige oder fehlerhafte H5-Ergebnisse f?hren zum Abbruch, nicht
-zu einer Einstufung als ?keine Maus?. Eine niedrige Likelihood bedeutet lediglich,
-dass keine ausreichend sichere Erkennung vorliegt. Bei Multi-Animal-Projekten
-muss die verwendete DLC-Version mit ihrer Tracking-Konfiguration H5-Ergebnisse
-auch f?r ein einzelnes Frame erzeugen k?nnen; zeitliche Track-Filter k?nnen dies
-verhindern. Dieser Netzwerkschritt ist mit dem konkreten Projekt zu pr?fen.
-Die bisherige automatisierte Pr?fung verwendet simulierte DLC-Inferenz und
-reale H5-, AVI- und MP4-Dateien.
+## Abhängigkeiten und Prüfungen
 
-DLC-Aufruf und H5-Ausgabe: [offizielle DLC-Dokumentation](https://deeplabcut.github.io/DeepLabCut/docs/standardDeepLabCut_UserGuide).
+`python -m pip install numpy opencv-python` sowie FFmpeg mit `libx264` im PATH.
+Alternativ `--ffmpeg "C:\Pfad\ffmpeg.exe"`. Für DLC zusätzlich eine passende
+DeepLabCut-Installation einschließlich pandas und PyTables sowie ein trainiertes Modell.
+Python 3.11 oder neuer wird für SHA256-Prüfungen gebundener JSON-Dateien benötigt.
+
+Bei unvollständiger oder ungültiger `session.json` werden Fragmente und
+Frame-Anzahlen aus der CSV gelesen. Fehlende FPS werden aus den AVI-Dateien
+ermittelt und auf übereinstimmung geprüft. Die CSV-Zeitstempel bleiben maßgeblich.
+Fehlende Fragmente, widersprüchliche Indizes/Frame-Anzahlen und Dekodierfehler
+führen zum Abbruch; der Fallback repariert keine Quelldateien.
+
+H.264 mit `--crf 18` ist verlustbehaftet und verwendet YUV420. Die Original-AVIs
+für quantitative Analysen aufbewahren. Verarbeitung erfolgt speichersparend;
+beim abschließenden Kopieren werden vorübergehend zwei Ausgabedateien benötigt.
+
+Regressionstests (synthetische Videos; keine echten Quellen ändern):
+
+```powershell
+python -B -m unittest video_postprocessing.test_merge_videos
+```

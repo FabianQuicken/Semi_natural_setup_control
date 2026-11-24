@@ -105,6 +105,7 @@ class VideoSink(threading.Thread):
         super().__init__(name=f'writer-{name}')
         self.folder, self.camera_name = Path(folder), name
         self.fps, self.codec, self.stop = fps, codec, stop
+        self.is_color = codec.upper() != 'FFV1'
         self.queue = queue.Queue(capacity)
         self.finished = threading.Event()
         self.stats = dict(selected=0, enqueued=0, queue_dropped=0, queue_high_water=0,
@@ -143,14 +144,16 @@ class VideoSink(threading.Thread):
                         height, width = frame.shape
                         writer = cv2.VideoWriter(str(self.folder / filename),
                                                  cv2.VideoWriter_fourcc(*self.codec),
-                                                 self.fps, (width, height), True)
+                                                 self.fps, (width, height), self.is_color)
                         if not writer.isOpened():
                             raise RuntimeError(f'Cannot open video writer: {filename} ({self.codec})')
                         self.clips.append(dict(file=filename, write_calls_completed=0,
                                                first_host_ns=host, last_host_ns=host))
                         current = segment
                     started = time.perf_counter()
-                    result = writer.write(cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR))
+                    if self.is_color:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                    result = writer.write(frame)
                     if result is False:
                         raise RuntimeError('VideoWriter.write reported failure')
                     elapsed = (time.perf_counter() - started) * 1000

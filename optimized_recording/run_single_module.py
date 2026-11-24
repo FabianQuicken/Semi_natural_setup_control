@@ -130,7 +130,7 @@ def parse_args():
     parser.add_argument('--width', type=int, default=1920)
     parser.add_argument('--height', type=int, default=1080)
     parser.add_argument('--exposure-us', type=float, default=4000)
-    parser.add_argument('--codec', default='MJPG', help='FourCC; compare MJPG and XVID on your machine')
+    parser.add_argument('--codec', default='FFV1', help='FourCC (default: FFV1, lossless grayscale)')
     parser.add_argument('--queue-frames', type=int, default=64)
     parser.add_argument('--camera-buffers', type=int, default=32)
     parser.add_argument('--mode', choices=['motion', 'continuous'], default='motion')

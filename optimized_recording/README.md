@@ -37,8 +37,8 @@ Use `--output D:\recordings` to select another disk.
 
 ## What changed and why
 
-- Each camera has an acquisition thread and a separate writer thread. Compression,
-  file I/O, and grayscale-to-BGR conversion run outside acquisition.
+- Each camera has an acquisition thread and a separate writer thread. Compression
+  and file I/O run outside acquisition.
 - `GrabStrategy_OneByOne` retains ordered SDK results instead of intentionally
   replacing older frames. Images are copied before releasing SDK buffers.
 - A bounded queue holds 64 raw Mono8 frames per camera. At Full HD, both queues
@@ -53,9 +53,9 @@ Use `--output D:\recordings` to select another disk.
   Splitting does not stop acquisition or wait to rediscover motion.
 - Preview is disabled by default and refreshes independently. OpenCV uses one internal
   processing thread to reduce contention when running two module processes.
-- MJPG is the default codec to try for this pipeline; it is not a measured guarantee
-  of better performance. `--codec XVID` permits comparison with the original codec.
-  MJPG can produce larger files, so watch disk capacity and sustained throughput.
+- The default is lossless, single-channel FFV1 in AVI. It writes the Mono8 frames
+  directly and requires FFV1 support in OpenCV. Explicit alternatives such as
+  `--codec MJPG` and `--codec XVID` use the grayscale-to-BGR conversion.
 - Writers are checked on opening and explicitly released. Exceptions stop the module
   and are recorded rather than allowing stale frames to be reused.
 
@@ -132,8 +132,8 @@ python optimized_recording/run_single_module.py --simulate --mode continuous --d
 ```
 
 Tests cover sequence gaps and rollover, motion gating, explicit overflow, failed
-writer opening, SDK buffer ownership, real MJPG output, clip splitting, full decode
-counts, pixel ordering, and missing-file detection. Simulation needs NumPy and
+writer opening, SDK buffer ownership, lossless FFV1 grayscale output, clip splitting,
+full decode counts, and missing-file detection. Simulation needs NumPy and
 OpenCV only. It does not establish achievable performance on your cameras.
 
 Start with a short continuous run on both real modules concurrently. Compare

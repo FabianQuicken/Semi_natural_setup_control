@@ -178,7 +178,8 @@ Beispiel eines aufgenommenen Bildes:
 6. Das Gate liefert eine Segmentnummer, z. B. 3, oder None.
 7. Bei Segment 3 wird das Bildpaket in die zugehörige Queue gelegt.
 8. Der Writer holt es ab und öffnet bei Bedarf top_000003.avi.
-9. Er wandelt das Bild in BGR um, schreibt es und protokolliert eine CSV-Zeile.
+9. Er schreibt das Bild und protokolliert eine CSV-Zeile. Bei FFV1 übergibt er
+   das Graubild direkt. Bei anderen Codecs wandelt er es vorher in BGR um.
 
 Ohne Aufnahmefreigabe entfallen Schritte 7 bis 9. Das ist gewollte Auswahl und
 wird nicht als Queue-Verlust gezählt. Die Kameraüberwachung läuft trotzdem.
@@ -359,12 +360,12 @@ run()
   mit führenden Nullen. Aus frame.shape werden Höhe und Breite gelesen.
 
   cv2.VideoWriter erhält Dateiname, FourCC, fps, Bildgröße (Breite, Höhe) und
-  True für Farbbilder. isOpened() wird geprüft; ohne offenen Writer wird ein
+  False für FFV1-Graubilder bzw. True für andere Codecs. Ohne offenen Writer wird ein
   RuntimeError ausgelöst. Ein neuer Eintrag in clips hält Dateiname, Schreib-
   zähler und ersten/letzten Host-Zeitstempel.
 
-  cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) erzeugt drei Farbkanäle aus demselben
-  Grauwert. Das Bild bleibt optisch grau, bekommt aber das erwartete Format.
+  Bei FFV1 bleibt jeder Grauwert im einkanaligen Bild erhalten. Für andere Codecs
+  erzeugt cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) drei Kanäle aus dem Grauwert.
   writer.write() übergibt es dem Videoencoder. Ein explizites False wird als
   Fehler gewertet. Ein gewöhnliches None ist kein nachgewiesener Fehler und
   wird als abgeschlossener Aufruf gezählt.
@@ -694,7 +695,7 @@ test_overflow_stops_and_accounts()
   Die Pakete sind absichtlich verkürzt, weil sie hier niemand entpackt.
 
 test_real_codec_split_decode_and_missing_file()
-  Nutzt einen temporären Ordner und echte OpenCV-MJPG-Ausgabe. Zwölf künstliche
+  Nutzt einen temporären Ordner und echte einkanalige OpenCV-FFV1-Ausgabe. Zwölf künstliche
   Bilder werden in zwei Segmente mit je sechs Bildern geteilt. finished wird
   schon vor start gesetzt; die Queue muss trotzdem vollständig geleert werden.
   join(10) wartet höchstens zehn Sekunden, danach wird auf Threadende geprüft.
@@ -772,8 +773,8 @@ Alle folgenden Optionen gehören zu run_single_module.py:
     Aufnahmeabmessungen in Pixeln.
   --exposure-us                Standard: 4000
     Belichtungszeit in Mikrosekunden; 4000 us entsprechen 4 ms.
-  --codec                      Standard: MJPG
-    Vierstelliges Codec-Kennzeichen, beispielsweise alternativ XVID.
+  --codec                      Standard: FFV1 (verlustfrei, einkanalig)
+    Vierstelliges Codec-Kennzeichen, beispielsweise alternativ MJPG oder XVID.
   --queue-frames               Standard: 64
     Maximale Anzahl wartender Rohbilder je Kamera im Python-Writerpuffer.
   --camera-buffers             Standard: 32
@@ -858,7 +859,7 @@ writer: Aufnahme und Speicherung
   queue_high_water: höchster beobachteter Queue-Füllstand.
   write_calls_completed: Schreibaufrufe mit anschließend erfolgreicher
     CSV-Protokollierung und Zähleraktualisierung.
-  max_write_ms: größter gemessener Zeitbedarf für BGR-Konvertierung plus write.
+  max_write_ms: größter gemessener Zeitbedarf für write inklusive eventueller BGR-Konvertierung.
   errors: Fehlertexte des Writers.
   enqueued_without_completed_write: enqueued minus write_calls_completed.
   clips: pro Clip file, write_calls_completed, first_host_ns und last_host_ns.

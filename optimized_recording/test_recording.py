@@ -58,10 +58,11 @@ class RecordingTests(unittest.TestCase):
 
     def test_real_codec_split_decode_and_missing_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            sink = VideoSink(directory, 'top', 30, 'MJPG', 32, threading.Event())
+            sink = VideoSink(directory, 'top', 30, 'FFV1', 32, threading.Event())
+            pattern = np.arange(48 * 64, dtype=np.uint8).reshape(48, 64)
             for number in range(12):
                 sink.submit((1 if number < 6 else 2, number, number + 1, number, number * 33333333,
-                             0, 0, np.full((48, 64), number * 10, np.uint8)))
+                             0, 0, pattern + number))
             sink.finished.set()
             sink.start()
             sink.join(10)
@@ -73,10 +74,11 @@ class RecordingTests(unittest.TestCase):
             self.assertTrue(result['all_video_counts_match'])
             self.assertEqual([clip['decoded'] for clip in result['clips']], [6, 6])
             capture = cv2.VideoCapture(str(Path(directory) / 'top_000001.avi'))
+            self.assertTrue(capture.set(cv2.CAP_PROP_CONVERT_RGB, 0))
             for number in range(6):
                 ok, frame = capture.read()
                 self.assertTrue(ok)
-                self.assertAlmostEqual(float(frame.mean()), number * 10, delta=2)
+                np.testing.assert_array_equal(frame, pattern + number)
             capture.release()
             (Path(directory) / 'top_000001.avi').unlink()
             self.assertFalse(verify_session(directory)['all_video_counts_match'])
